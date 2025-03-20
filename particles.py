@@ -1,14 +1,18 @@
 import numpy as np
 import os
 
-def generate(side_length, dx):
-    # sample nodes uniformly on a square
+def generate(side_length, dx, random=False):
+    # add points points uniformly on a square
     n_seg = int(side_length / dx)
     x = np.array([[0.0, 0.0]] * ((n_seg + 1) ** 2))
     step = side_length / n_seg
     for i in range(0, n_seg + 1):
         for j in range(0, n_seg + 1):
-            x[i * (n_seg + 1) + j] = [-side_length / 2 + i * step, -side_length / 2 + j * step]
+            rand_x = np.random.uniform(-dx / 4, dx / 4) if random else 0
+            rand_y = np.random.uniform(-dx / 4, dx / 4) if random else 0
+
+            p = [-side_length / 2 + i * step + rand_x, -side_length / 2 + j * step + rand_y]
+            x[i * (n_seg + 1) + j] = p
 
     return [x]
 

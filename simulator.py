@@ -5,6 +5,7 @@ import pygame       # pygame for visualization
 pygame.init()
 
 import particles   # particles set up
+import energy
 # import time_integrator
 
 
@@ -21,7 +22,6 @@ def clamp(x, a, b):
 # ANCHOR: sim_setup
 # simulation setup
 side_len = 0.45
-rho = 1000      # density of square
 E = 1e5         # Young's modulus
 nu = 0.4        # Poisson's ratio
 n_seg = 2       # num of segments per side of the square
@@ -31,7 +31,17 @@ n_seg = 2       # num of segments per side of the square
 # DBC_limit = [np.array([0.0, -0.7])]     # dirichlet node limit position
 ground_n = np.array([0.0, 1.0])         # normal of the slope
 ground_n /= np.linalg.norm(ground_n)    # normalize ground normal vector just in case
-ground_o = np.array([0.0, 70.0])        # a point on the slope  
+ground_o = np.array([0.0, 75.0])        # a point on the slope  
+
+left_n = np.array([1.0, 0.0])           # normal of the left wall
+left_n /= np.linalg.norm(left_n)        # normalize left wall normal vector just in case
+left_o = np.array([50.0, 0.0])         # a point on the left wall
+
+right_n = np.array([-1.0, 0.0])         # normal of the right wall
+right_n /= np.linalg.norm(right_n)      # normalize right wall normal vector just in case
+right_o = np.array([150.0, 0.0])         # a point on the right wall
+
+
 mu = 0.4        # friction coefficient of the slope
 
 print("ground_n: ", ground_n)
@@ -48,7 +58,7 @@ gravity = [0.0, -9.8]
 width = 200
 height = 200
 
-f_spacing = 10
+f_spacing = 5
 f_num_X = int(width / f_spacing) + 1
 f_num_Y = int(height / f_spacing) + 1
 h = max([float(width / f_num_X), float(height / f_num_Y)])
@@ -57,7 +67,7 @@ f_num_cells = f_num_X * f_num_Y
 
 print(f_num_X, f_num_Y, h, f_num_cells)
 
-dt = 0.05
+dt = 0.025
 
 
 # grid setup
@@ -84,7 +94,8 @@ particle_density = [0.0] * f_num_cells
 particle_rest_density = 0.0
 
 
-particle_radius = 0.2 * h
+particle_radius = 0.4 * h
+particle_mass = 0.8 * particle_radius * particle_radius * particle_radius * rho
 p_spacing = 2.0
 dx = p_spacing * particle_radius
 p_inv_spacing = 1.0 / dx
@@ -95,13 +106,14 @@ p_num_cells = p_num_X * p_num_Y
 num_cell_particles = [0] * p_num_cells
 first_cell_particle = [0] * (p_num_cells+1)
 cell_particle = [0] * max_particles
-max_particles_per_cell = 100
+max_particles_per_cell = 10
 
-[xtmp] = particles.generate(50, dx)
+[xtmp] = particles.generate(50, dx, True)
 num_particles = len(xtmp)
 for i in range(num_particles):
     if(i < max_particles):
-        particle_pos[i] = (xtmp[i]) + [width / 2, height / 2]
+        particle_pos[i] = (xtmp[i]) + [width/2 - 25, height / 2]
+        particle_vel[i] = [0.0, -5.0]
     else:
         break
 
@@ -119,11 +131,11 @@ def integrateParticles(dt, gravity):
         x = particle_pos[i][0]
         y = particle_pos[i][1]
 
-        if x < 0.0:
-            particle_pos[i][0] = 0.0
+        if x < left_o[0]:
+            particle_pos[i][0] = left_o[0]
             particle_vel[i][0] = 0.0
-        if x >= width:
-            particle_pos[i][0] = width
+        if x >= right_o[0]:
+            particle_pos[i][0] = right_o[0]
             particle_vel[i][0] = 0.0
         if y < ground_o[1]:
             particle_pos[i][1] = ground_o[1]
@@ -182,9 +194,10 @@ def pushParticlesApart(num_iterations):
                 for yi in range(y0, y1 + 1):
                     cell = xi * p_num_Y + yi
                     for j in range(first_cell_particle[cell], first_cell_particle[cell + 1]):
-                        if i != cell_particle[j]:
-                            p2 = particle_pos[cell_particle[j]]
-                            d = np.array([p1[0] - p2[0], p1[1] - p2[1]])
+                        id = cell_particle[j]
+                        if i != id:
+                            p2 = particle_pos[id]
+                            d = np.array([p2[0] - p1[0], p2[1] - p1[1]])
                             dist2 = np.dot(d, d)
                             if dist2 < min_dist2 and dist2 > 0.0:
                                 dist = np.sqrt(dist2)
@@ -195,7 +208,7 @@ def pushParticlesApart(num_iterations):
                                 p2[1] += d[1] * diff
 
                                 particle_pos[i] = p1
-                                particle_pos[cell_particle[j]] = p2
+                                particle_pos[id] = p2
 
     
 
@@ -360,10 +373,10 @@ def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
                 # div *= 1.9
 
                 if(particle_rest_density > 0.0 and compensateDrift):
-                    k = 10000.0
+                    k = 1.0
                     compression = particle_density[c] - particle_rest_density
                     if compression > 0.0:
-                        div -= k * compression
+                        div = div - k * compression
 
                 this_p = -div / this_s
                 this_p *= over_relaxation
@@ -444,18 +457,28 @@ for i in range(f_num_X):
         x3 = [(i + 1) * h, (j + 1) * h]
         x4 = [i * h, (j + 1) * h]
         # x - o dot n < 0
-        c1 = (x1[0] - ground_o[0]) * ground_n[0] + (x1[1] - ground_o[1]) * ground_n[1]
-        c2 = (x2[0] - ground_o[0]) * ground_n[0] + (x2[1] - ground_o[1]) * ground_n[1]
-        c3 = (x3[0] - ground_o[0]) * ground_n[0] + (x3[1] - ground_o[1]) * ground_n[1]
-        c4 = (x4[0] - ground_o[0]) * ground_n[0] + (x4[1] - ground_o[1]) * ground_n[1]
-        if c1 < 0.0 or c2 < 0.0 or c3 < 0.0 or c4 < 0.0:
+        c1_g = (x1[0] - ground_o[0]) * ground_n[0] + (x1[1] - ground_o[1]) * ground_n[1]
+        c2_g = (x2[0] - ground_o[0]) * ground_n[0] + (x2[1] - ground_o[1]) * ground_n[1]
+        c3_g = (x3[0] - ground_o[0]) * ground_n[0] + (x3[1] - ground_o[1]) * ground_n[1]
+        c4_g = (x4[0] - ground_o[0]) * ground_n[0] + (x4[1] - ground_o[1]) * ground_n[1]
+        
+        c1_l = (x1[0] - left_o[0]) * left_n[0] + (x1[1] - left_o[1]) * left_n[1]
+        c2_l = (x2[0] - left_o[0]) * left_n[0] + (x2[1] - left_o[1]) * left_n[1]
+        c3_l = (x3[0] - left_o[0]) * left_n[0] + (x3[1] - left_o[1]) * left_n[1]
+        c4_l = (x4[0] - left_o[0]) * left_n[0] + (x4[1] - left_o[1]) * left_n[1]
+
+        c1_r = (x1[0] - right_o[0]) * right_n[0] + (x1[1] - right_o[1]) * right_n[1]
+        c2_r = (x2[0] - right_o[0]) * right_n[0] + (x2[1] - right_o[1]) * right_n[1]
+        c3_r = (x3[0] - right_o[0]) * right_n[0] + (x3[1] - right_o[1]) * right_n[1]
+        c4_r = (x4[0] - right_o[0]) * right_n[0] + (x4[1] - right_o[1]) * right_n[1]
+
+        s[c] = 1.0
+        if c1_l < 0.0 or c2_l < 0.0 or c3_l < 0.0 or c4_l < 0.0:
+            s[c] = 0.0 
+        if c1_g < 0.0 or c2_g < 0.0 or c3_g < 0.0 or c4_g < 0.0:
             s[c] = 0.0
-            # print('solid cell', c)
-            # cell_color[c] = 0.0
-        else:
-            s[c] = 1.0
-            # print('air cell', c)
-            # cell_color[c] = 1.0
+        if c1_r < 0.0 or c2_r < 0.0 or c3_r < 0.0 or c4_r < 0.0:
+            s[c] = 0.0
 
 # simulation with visualization
 resolution = np.array([600, 600])
@@ -469,6 +492,7 @@ time_step = 0
 draw_grid = False
 draw_cells = False
 show_numbers = False
+calc_KE = False
 particles.write_to_file(time_step, particle_pos, num_particles)
 screen = pygame.display.set_mode(resolution)
 # display_surface = pygame.display.set_mode((width, height))
@@ -490,6 +514,8 @@ while running:
                 running = False
             if event.key == pygame.K_n:
                 show_numbers = not show_numbers
+            if event.key == pygame.K_k:
+                calc_KE = not calc_KE
 
     if paused:
         pygame.time.wait(int(dt * 1000))
@@ -533,6 +559,8 @@ while running:
 
     # pygame.draw.circle(screen, (255, 0, 0), screen_projection([0, 0]), 2 * scale)  # draw a red circle
     pygame.draw.aaline(screen, (255, 0, 255), screen_projection([0,ground_o[1]]), screen_projection([width, ground_o[1]]))   # ground 
+    pygame.draw.aaline(screen, (255, 0, 255), screen_projection([left_o[0], 0]), screen_projection([left_o[0], height]))   # left wall
+    pygame.draw.aaline(screen, (255, 0, 255), screen_projection([right_o[0], 0]), screen_projection([right_o[0], height]))   # right wall
 
     # draw particles
     for xId in range(0, num_particles):
@@ -543,6 +571,10 @@ while running:
 
     # step forward simulation and wait for screen refresh
     simulate()
+    if(calc_KE):
+        ke = energy.kineticEnergy(particle_mass, particle_vel)
+        print('Kinetic energy:', ke)
+
     time_step += 1
     pygame.time.wait(int(dt * 1000))
     particles.write_to_file(time_step, particle_pos, num_particles)
