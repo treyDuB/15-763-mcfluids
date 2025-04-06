@@ -41,7 +41,6 @@ print("ground_o: ", ground_o)
 
 #fluid setup
 
-rho = 1000 # density
 gravity = [0.0, -9.8]
 
 

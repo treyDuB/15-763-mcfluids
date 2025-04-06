@@ -1,6 +1,18 @@
 import numpy as np
 import os
 
+# def generate(side_length, dx):
+#     # sample nodes uniformly on a square
+#     n_seg = int(side_length / dx)
+#     x = np.array([[0.0, 0.0]] * ((n_seg + 1) ** 2))
+#     step = side_length / n_seg
+#     for i in range(0, n_seg + 1):
+#         for j in range(0, n_seg + 1):
+#             x[i * (n_seg + 1) + j] = [-side_length / 2 + i * step, -side_length / 2 + j * step]
+
+#     return [x]
+
+#Actually make uniformly randomly spaced points
 def generate(side_length, dx):
     # sample nodes uniformly on a square
     n_seg = int(side_length / dx)
@@ -8,10 +20,10 @@ def generate(side_length, dx):
     step = side_length / n_seg
     for i in range(0, n_seg + 1):
         for j in range(0, n_seg + 1):
-            x[i * (n_seg + 1) + j] = [-side_length / 2 + i * step, -side_length / 2 + j * step]
+            x[i * (n_seg + 1) + j] = [np.random.uniform(0., side_length), np.random.uniform(0., side_length)]
+            # [-side_length / 2 + i * step, -side_length / 2 + j * step]
 
     return [x]
-
 
 def write_to_file(frameNum, x, num_particles):
     # Check if 'output' directory exists; if not, create it
