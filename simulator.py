@@ -58,8 +58,8 @@ width = 200
 height = 200
 
 f_spacing = 5
-f_num_X = int(width / f_spacing) + 1
-f_num_Y = int(height / f_spacing) + 1
+f_num_X = int(width / f_spacing) + 1  # number of grid cell walls?
+f_num_Y = int(height / f_spacing) + 1 # ^
 h = max([float(width / f_num_X), float(height / f_num_Y)])
 f_inv_spacing = 1.0 / h
 f_num_cells = f_num_X * f_num_Y
@@ -76,8 +76,8 @@ du = [0.0] * f_num_cells
 dv = [0.0] * f_num_cells
 prev_U = [0.0] * f_num_cells
 prev_V = [0.0] * f_num_cells
-p = [0.0] * f_num_cells
-s = [0.0] * f_num_cells
+p = [0.0] * f_num_cells              # what does this mean?
+s = [0.0] * f_num_cells              # this too
 cell_type = [AIR_CELL] * f_num_cells
 cell_color = [0.0] * f_num_cells
 
@@ -103,7 +103,7 @@ p_num_Y = int(height * p_inv_spacing) + 1
 p_num_cells = p_num_X * p_num_Y
 
 num_cell_particles = [0] * p_num_cells
-first_cell_particle = [0] * (p_num_cells+1)
+first_cell_particle = [0] * (p_num_cells+1) # why +1?
 cell_particle = [0] * max_particles
 max_particles_per_cell = 10
 
@@ -117,7 +117,7 @@ for i in range(num_particles):
         break
 
 
-def integrateParticles(dt, gravity):
+def integrateParticles(dt : float, gravity : list[float]):
     global particle_pos, particle_vel, num_particles, width, height, ground_o, ground_n
 
     for i in range(0, num_particles):
@@ -143,7 +143,7 @@ def integrateParticles(dt, gravity):
             particle_pos[i][1] = height
             particle_vel[i][1] = 0.0
 
-def pushParticlesApart(num_iterations):
+def pushParticlesApart(num_iterations : int):
     global particle_pos, num_particles, p_num_X, p_num_Y, p_inv_spacing, p_num_cells, particle_radius
     global num_cell_particles, first_cell_particle, cell_particle
 
@@ -214,7 +214,7 @@ def pushParticlesApart(num_iterations):
 
 
 
-def transferVelocities(toGrid, flipRatio):
+def transferVelocities(toGrid : bool, flipRatio : float):
     global u, v, du, dv, prev_U, prev_V, cell_type, particle_pos, particle_vel
     global num_particles, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
 
@@ -333,8 +333,8 @@ def transferVelocities(toGrid, flipRatio):
                 if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-1] == SOLID_CELL):
                     v[c] = prev_V[c]
 
-
-def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
+# Monte Carlo pressure gradient estimation probably goes somewhere in here or updateParticleDensity?
+def solveIncmpressibility(num_iterations : int, dt : float, over_relaxation : float, compensateDrift : bool):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
 
@@ -440,7 +440,7 @@ def simulate():
     pushParticlesApart(20)
     transferVelocities(True, 0.9)
     updateParticleDensity()
-    solveIncmpressability(100, dt, 1.9, False)
+    solveIncmpressibility(100, dt, 1.9, False)
     transferVelocities(False, 0.9)
     # setBoundaryConditions()
     # updateParticles()
