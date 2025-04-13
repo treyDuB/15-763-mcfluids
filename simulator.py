@@ -5,7 +5,9 @@ import pygame       # pygame for visualization
 pygame.init()
 
 import particles   # particles set up
-import energy
+import integrate  # integration helper
+import functions  # helper functions
+import energy  # energy calculation
 # import time_integrator
 
 
@@ -19,9 +21,12 @@ SOLID_CELL = 2
 def clamp(x, a, b):
     return min(max(x, a), b)
 
+
+
 # ANCHOR: sim_setup
 # simulation setup
 side_len = 0.45
+rho = 1000      # density of square
 E = 1e5         # Young's modulus
 nu = 0.4        # Poisson's ratio
 n_seg = 2       # num of segments per side of the square
@@ -57,26 +62,31 @@ gravity = [0.0, -9.8]
 
 width = 200
 height = 200
+depth = 1
 
-f_spacing = 5
+f_spacing = 10
 f_num_X = int(width / f_spacing) + 1
 f_num_Y = int(height / f_spacing) + 1
+f_num_Z = int(depth / f_spacing) + 1 # not used
 h = max([float(width / f_num_X), float(height / f_num_Y)])
 f_inv_spacing = 1.0 / h
 f_num_cells = f_num_X * f_num_Y
 
 print(f_num_X, f_num_Y, h, f_num_cells)
 
-dt = 0.025
+dt = 0.05
 
 
 # grid setup
 u = [0.0] * f_num_cells
 v = [0.0] * f_num_cells
+w = [0.0] * f_num_cells # not used
 du = [0.0] * f_num_cells
 dv = [0.0] * f_num_cells
+dw = [0.0] * f_num_cells # not used
 prev_U = [0.0] * f_num_cells
 prev_V = [0.0] * f_num_cells
+prev_W = [0.0] * f_num_cells # not used
 p = [0.0] * f_num_cells
 s = [0.0] * f_num_cells
 cell_type = [AIR_CELL] * f_num_cells
@@ -94,28 +104,32 @@ particle_density = [0.0] * f_num_cells
 particle_rest_density = 0.0
 
 
-particle_radius = 0.4 * h
+particle_radius = 0.2 * h
 particle_mass = 0.8 * particle_radius * particle_radius * particle_radius * rho
 p_spacing = 2.0
 dx = p_spacing * particle_radius
 p_inv_spacing = 1.0 / dx
 p_num_X = int(width * p_inv_spacing) + 1
 p_num_Y = int(height * p_inv_spacing) + 1
-p_num_cells = p_num_X * p_num_Y
+p_num_Z = int(depth * p_inv_spacing) + 1 # not used
+
+
+p_num_cells = p_num_X * p_num_Y 
 
 num_cell_particles = [0] * p_num_cells
 first_cell_particle = [0] * (p_num_cells+1)
 cell_particle = [0] * max_particles
-max_particles_per_cell = 10
+max_particles_per_cell = 100
 
-[xtmp] = particles.generate(50, dx, True)
+[xtmp] = particles.generate(50, dx)
 num_particles = len(xtmp)
 for i in range(num_particles):
     if(i < max_particles):
-        particle_pos[i] = (xtmp[i]) + [width/2 - 25, height / 2]
-        particle_vel[i] = [0.0, -5.0]
+        particle_pos[i] = (xtmp[i]) + [width / 2, height / 2]
     else:
         break
+
+particle_vel = particles.perturb(particle_vel, 0.1)
 
 
 def integrateParticles(dt, gravity):
@@ -130,6 +144,7 @@ def integrateParticles(dt, gravity):
 
         x = particle_pos[i][0]
         y = particle_pos[i][1]
+        # particle_pos[i][2] = 0.0
 
         if x < left_o[0]:
             particle_pos[i][0] = left_o[0]
@@ -341,8 +356,8 @@ def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
 
     p = [0.0] * f_num_cells
     
-    prev_U = u
-    prev_V = v
+    u3 = u
+    v3 = v
 
     n = f_num_Y
     cp = rho * h / dt
@@ -373,10 +388,10 @@ def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
                 # div *= 1.9
 
                 if(particle_rest_density > 0.0 and compensateDrift):
-                    k = 1.0
+                    k = 10000.0
                     compression = particle_density[c] - particle_rest_density
                     if compression > 0.0:
-                        div = div - k * compression
+                        div -= k * compression
 
                 this_p = -div / this_s
                 this_p *= over_relaxation
@@ -436,13 +451,87 @@ def updateParticleDensity():
 
     particle_density = d
 
+def advection(): # Advection step u1 = u0(x - u0(x)*dt)
+    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+    global prev_U, prev_V, rho, particle_density, particle_rest_density
+    
+    u0 = u
+    v0 = v
+
+    u1 = [0.0] * f_num_cells
+    v1 = [0.0] * f_num_cells
+
+    for i in range(f_num_X):
+        for j in range(f_num_Y):
+            c = i * f_num_Y + j
+            if cell_type[c] != FLUID_CELL:
+                continue
+
+            left = (i - 1) * f_num_Y + j
+            right = (i + 1) * f_num_Y + j
+            bottom = i * f_num_Y + j - 1
+            top = i * f_num_Y + j + 1
+
+            x = i * h + 0.5 * h
+            y = j * h + 0.5 * h
+
+            x = x - u0[c] * dt
+            y = y - v0[c] * dt
+
+            [u1[c], v1[c]] = integrate.evaluateVelocityAtPosition([x, y], h, u0, v0, f_num_Y)
+
+    u = u1
+    v = v1
+
+
+def externalForces():
+    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+    global prev_U, prev_V, rho, particle_density, particle_rest_density
+
+    for i in range(f_num_cells):
+        if cell_type[i] == FLUID_CELL:
+            u[i] += gravity[0] * dt
+            v[i] += gravity[1] * dt
+
+    # for i in range(len(ground_n)):
+    #     if cell_type[i] == FLUID_CELL:
+    #         u[i] += ground_n[0] * dt
+    #         v[i] += ground_n[1] * dt
+
+def projection():
+    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+    global prev_U, prev_V, rho, particle_density, particle_rest_density
+
+    u3 = u
+    v3 = v
+
+    u4 = [0.0] * f_num_cells
+    v4 = [0.0] * f_num_cells
+
+    #Want u4 and v4 to be the divergence of u3 and v3
+    grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
+    # grad_p = np.array([0.0, 0.0]) * f_num_cells
+
+
 def simulate():
-    integrateParticles(dt, gravity)
+    global u, v, prev_U, prev_V, dt, gravity
+    integrateParticles(dt, gravity) # step forward in time
     pushParticlesApart(20)
+
     transferVelocities(True, 0.9)
+
+    # On grid:
+    prev_U = u
+    prev_V = v
     updateParticleDensity()
-    solveIncmpressability(100, dt, 1.9, False)
+    advection()
+    # externalForces()
+    # diffusion() # solving for viscosity
+    solveIncmpressability(100, dt, 1.9, False) # TODO: solve for projection instead
+    # projection()
+
     transferVelocities(False, 0.9)
+
     # setBoundaryConditions()
     # updateParticles()
 
