@@ -376,7 +376,7 @@ def solveIncmpressibility(num_iterations : int, dt : float, over_relaxation : fl
                     compression = particle_density[c] - particle_rest_density
                     if compression > 0.0:
                         div = div - k * compression
-
+                
                 this_p = -div / this_s
                 this_p *= over_relaxation
                 p[c] += (this_p * cp)
