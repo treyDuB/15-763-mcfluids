@@ -17,6 +17,7 @@ V_FIELD = 1
 AIR_CELL = 0
 FLUID_CELL = 1
 SOLID_CELL = 2
+FLUID_BOUNDARY_CELL = 3
 
 def clamp(x, a, b):
     return min(max(x, a), b)
@@ -45,6 +46,13 @@ left_o = np.array([50.0, 0.0])         # a point on the left wall
 right_n = np.array([-1.0, 0.0])         # normal of the right wall
 right_n /= np.linalg.norm(right_n)      # normalize right wall normal vector just in case
 right_o = np.array([150.0, 0.0])         # a point on the right wall
+
+use_DBC = False
+
+if(use_DBC):
+    DBC = [(n_seg + 1) * (n_seg + 1) * 2]   # dirichlet node index
+    DBC_v = [np.array([0.0, -0.5])]         # dirichlet node velocity
+    DBC_limit = [np.array([0.0, -0.7])]     # dirichlet node limit position
 
 
 mu = 0.4        # friction coefficient of the slope
@@ -91,6 +99,9 @@ p = [0.0] * f_num_cells # pressure
 s = [0.0] * f_num_cells # solid flag
 cell_type = [AIR_CELL] * f_num_cells
 cell_color = [0.0] * f_num_cells
+num_fluid_cells = 0
+num_boundary_cells = 0
+
 
 # particle setup
 max_particles = 1000
@@ -233,6 +244,7 @@ def pushParticlesApart(num_iterations):
 def transferVelocities(toGrid, flipRatio):
     global u, v, du, dv, prev_U, prev_V, cell_type, particle_pos, particle_vel
     global num_particles, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+    global num_fluid_cells, num_boundary_cells, boundary_cells
 
     n = f_num_Y
     # h = f_spacing
@@ -246,6 +258,9 @@ def transferVelocities(toGrid, flipRatio):
         dv = [0.0] * f_num_cells
         u = [0.0] * f_num_cells
         v = [0.0] * f_num_cells
+
+        num_fluid_cells = 0
+        num_boundary_cells = 0
 
         for i in range(f_num_cells):
             cell_type[i] = SOLID_CELL if s[i] == 0.0 else AIR_CELL
@@ -261,7 +276,20 @@ def transferVelocities(toGrid, flipRatio):
             
             if (cell_type[cell_num] == AIR_CELL):
                 cell_type[cell_num] = FLUID_CELL
+                num_fluid_cells += 1
                 # cell_color[cell_num] = 1.0
+        for i in range(f_num_cells):
+            if cell_type[i] == FLUID_CELL:
+                #check for boundary cells
+                x0 = i - n
+                x1 = i + n
+                y0 = i - 1
+                y1 = i + 1
+                if (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
+                    cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
+                    cell_type[i] = FLUID_BOUNDARY_CELL
+                    num_boundary_cells += 1
+
             
     for component in [0,1]:
         dx = 0.0 if component == 0 else h_2
@@ -366,7 +394,7 @@ def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift)
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * n + j
-                if cell_type != FLUID_CELL:
+                if cell_type == AIR_CELL or cell_type[c] == SOLID_CELL:
                     continue
 
                 left = (i - 1) * n + j
@@ -404,6 +432,7 @@ def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift)
 def updateParticleDensity():
     global particle_density, particle_rest_density, particle_pos, num_particles
     global f_num_X, f_num_Y, h, f_inv_spacing, f_num_cells, cell_type
+    global num_fluid_cells, num_boundary_cells
 
     n = f_num_Y
     h_1 = f_inv_spacing
@@ -440,11 +469,9 @@ def updateParticleDensity():
 
     if(particle_rest_density == 0.0):
         sum = 0.0
-        num_fluid_cells = 0
         for i in range(f_num_cells):
-            if cell_type[i] == FLUID_CELL:
+            if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
                 sum += d[i]
-                num_fluid_cells += 1
         if num_fluid_cells > 0:
                 particle_rest_density = sum / num_fluid_cells
         print('rest density', particle_rest_density)
@@ -464,7 +491,7 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
     for i in range(f_num_X):
         for j in range(f_num_Y):
             c = i * f_num_Y + j
-            if cell_type[c] != FLUID_CELL:
+            if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
                 continue
 
             left = (i - 1) * f_num_Y + j
@@ -489,7 +516,7 @@ def externalForces():
     global prev_U, prev_V, rho, particle_density, particle_rest_density
 
     for i in range(f_num_cells):
-        if cell_type[i] == FLUID_CELL:
+        if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
             u[i] += gravity[0] * dt
             v[i] += gravity[1] * dt
 
@@ -627,6 +654,9 @@ while running and __name__ == "__main__":
                 elif cell_type[c] == FLUID_CELL:
                     # print('fluid cell', c)
                     pygame.draw.rect(screen, (20, 20, 170), (screen_projection([i * h, (j+1) * h]), [scale * h, scale *h]))
+                elif cell_type[c] == FLUID_BOUNDARY_CELL:
+                    # print('fluid boundary cell', c)
+                    pygame.draw.rect(screen, (50, 50, 200), (screen_projection([i * h, (j+1) * h]), [scale * h, scale *h]))
                 elif cell_type[c] == SOLID_CELL:
                     # print('solid cell', c)
                     pygame.draw.rect(screen, (0, 150, 0), (screen_projection([i * h, (j+1) * h]), [scale * h, scale * h]))
