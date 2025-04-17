@@ -87,8 +87,8 @@ dw = [0.0] * f_num_cells # not used
 prev_U = [0.0] * f_num_cells
 prev_V = [0.0] * f_num_cells
 prev_W = [0.0] * f_num_cells # not used
-p = [0.0] * f_num_cells
-s = [0.0] * f_num_cells
+p = [0.0] * f_num_cells # pressure
+s = [0.0] * f_num_cells # solid flag
 cell_type = [AIR_CELL] * f_num_cells
 cell_color = [0.0] * f_num_cells
 
@@ -350,7 +350,7 @@ def transferVelocities(toGrid, flipRatio):
                     v[c] = prev_V[c]
 
 
-def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
+def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
 
@@ -395,7 +395,7 @@ def solveIncmpressability(num_iterations, dt, over_relaxation, compensateDrift):
 
                 this_p = -div / this_s
                 this_p *= over_relaxation
-                p[c] += (this_p * cp)
+                p[c] += (this_p * cp) # pressure
                 u[c] -= (this_p * sx0)
                 u[right] += (this_p * sx1)
                 v[c] -= (this_p * sy0)
@@ -527,7 +527,7 @@ def simulate():
     advection()
     # externalForces()
     # diffusion() # solving for viscosity
-    solveIncmpressability(100, dt, 1.9, False) # TODO: solve for projection instead
+    solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
     # projection()
 
     transferVelocities(False, 0.9)
@@ -578,6 +578,7 @@ def screen_projection(x):
 
 
 time_step = 0
+max_time_step = 200
 draw_grid = False
 draw_cells = False
 show_numbers = False
@@ -587,7 +588,7 @@ screen = pygame.display.set_mode(resolution)
 # display_surface = pygame.display.set_mode((width, height))
 running = True
 paused = False
-while running:
+while running and __name__ == "__main__":
     # run until the user asks to quit
     for event in pygame.event.get():
         if event.type == pygame.QUIT:

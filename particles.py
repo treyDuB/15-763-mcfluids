@@ -45,4 +45,26 @@ def write_to_file(frameNum, x, num_particles):
         # write particle coordinates
         for i in range(num_particles):
             row = x[i]
-            f.write(f"v {float(row[0]):.6f} {float(row[1]):.6f} 0.0\n") 
+            f.write(f"v {float(row[0]):.6f} {float(row[1]):.6f} 0.0\n")
+
+def read_from_file(frameNum):
+    # Check if 'output' directory exists; if not, create it
+    if not os.path.exists('output'):
+        os.makedirs('output')
+
+    # read obj file
+    filename = f"output/{frameNum}.obj"
+    if not os.path.isfile(filename):
+        filename = f"output/0.obj"
+        return [None, 0, True]
+    
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        num_particles = len(lines)
+        x = np.zeros((num_particles, 2))
+        # read particle coordinates
+        for i in range(num_particles):
+            row = lines[i].split()
+            x[i] = [float(row[1]), float(row[2])]
+
+    return [x, num_particles, False]
