@@ -72,7 +72,7 @@ width = 200
 height = 200
 depth = 1
 
-f_spacing = 10
+f_spacing = 10.0 # spacing between fluid cells
 f_num_X = int(width / f_spacing) + 1
 f_num_Y = int(height / f_spacing) + 1
 f_num_Z = int(depth / f_spacing) + 1 # not used
@@ -143,8 +143,9 @@ for i in range(num_particles):
 particle_vel = particles.perturb(particle_vel, 0.1)
 
 
-def integrateParticles(dt, gravity):
+def integrateParticles(dt):
     global particle_pos, particle_vel, num_particles, width, height, ground_o, ground_n
+    global gravity
 
     for i in range(0, num_particles):
         particle_vel[i][0] += gravity[0] * dt
@@ -203,7 +204,7 @@ def pushParticlesApart(num_iterations):
         first_cell_particle[cell] -= 1
 
     # push particles apart
-    min_dist = 2.0 * particle_radius
+    min_dist = particle_radius * 2.0
     min_dist2 = min_dist * min_dist
 
     for iter in range(num_iterations):
@@ -365,9 +366,9 @@ def transferVelocities(toGrid, flipRatio):
             dv = df
 
     if toGrid:
-        for i in range(len(f)):
-            if df[i] > 0.0:
-                f[i] /= df[i]
+        # for i in range(len(f)):
+        #     if df[i] > 0.0:
+        #         f[i] /= df[i]
         # restore solid cells
         for i in range(f_num_X):
             for j in range(f_num_Y):
@@ -478,6 +479,13 @@ def updateParticleDensity():
 
     particle_density = d
 
+    # get pressure
+    for i in range(f_num_cells):
+        if particle_density[i] > 0.0:
+            p[i] = (particle_density[i] - particle_rest_density) / particle_rest_density
+        else:
+            p[i] = 0.0
+
 def advection(): # Advection step u1 = u0(x - u0(x)*dt)
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
@@ -514,16 +522,28 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
 def externalForces():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
+    global gravity
+
+    u1 = u
+    v1 = v
+
+    u2 = [0.0] * f_num_cells
+    v2 = [0.0] * f_num_cells
 
     for i in range(f_num_cells):
-        if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
-            u[i] += gravity[0] * dt
-            v[i] += gravity[1] * dt
+        # if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
+        # u2[i] = u1[i] + gravity[0] * dt
+        # v2[i] = v1[i] + gravity[1] * dt
+        u2[i] = u1[i] + 50.0
+        v2[i] = v1[i] + 50.0
 
     # for i in range(len(ground_n)):
     #     if cell_type[i] == FLUID_CELL:
     #         u[i] += ground_n[0] * dt
     #         v[i] += ground_n[1] * dt
+
+    u = u2
+    v = v2
 
 def projection():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -536,26 +556,60 @@ def projection():
     v4 = [0.0] * f_num_cells
 
     #Want u4 and v4 to be the divergence of u3 and v3
-    grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
-    # grad_p = np.array([0.0, 0.0]) * f_num_cells
+    # grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
+    grad_p = np.array([0.0, 0.0]) * f_num_cells
+
+    inv_rho = 1.0 / rho
+    inv_h = 1.0 / h
+
+    coef = dt * inv_rho * inv_h * 1000.0
+
+    for i in range(f_num_X):
+        for j in range(f_num_Y):
+            c = i * f_num_Y + j
+            if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
+                continue
+
+            # left = (i - 1) * f_num_Y + j
+            right = (i + 1) * f_num_Y + j
+            # bottom = i * f_num_Y + j - 1
+            top = i * f_num_Y + j + 1
+
+            u4[c] = u3[c] - coef * (p[right] - p[c])
+            v4[c] = v3[c] - coef * (p[top] - p[c])
+
+    # u = u4
+    # v = v4
+    # u = [0.0] * f_num_cells
+    # v = [0.0] * f_num_cells
+    for i in range(f_num_cells):
+        u[i] = u4[i]
+        v[i] = v4[i]
+
+
 
 
 def simulate():
-    global u, v, prev_U, prev_V, dt, gravity
-    integrateParticles(dt, gravity) # step forward in time
+    global u, v, prev_U, prev_V, dt
+    integrateParticles(dt) # step forward in time
     pushParticlesApart(20)
 
     transferVelocities(True, 0.9)
+
+    # print cell types
+    # print("Number of fluid cells:", num_fluid_cells)
+    # print("Number of boundary cells:", num_boundary_cells)
+
 
     # On grid:
     prev_U = u
     prev_V = v
     updateParticleDensity()
     advection()
-    # externalForces()
+    externalForces()
     # diffusion() # solving for viscosity
-    solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
-    # projection()
+    # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
+    projection()
 
     transferVelocities(False, 0.9)
 
