@@ -580,9 +580,9 @@ def pressureProjectionMC(num_samples : int):
             E_V *= 1. / num_samples 
             E_A *= 1. / num_samples
             p_grad = E_V + E_A
-            u[c] += p_grad
+            u[c] -= p_grad
             u[right] += p_grad
-            v[c] += p_grad
+            v[c] -= p_grad
             v[top] += p_grad
 
 def simulate():
