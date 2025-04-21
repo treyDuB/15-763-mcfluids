@@ -10,7 +10,6 @@ import functions  # helper functions
 import energy  # energy calculation
 # import time_integrator
 
-
 U_FIELD = 0
 V_FIELD = 1
 
@@ -22,19 +21,14 @@ FLUID_BOUNDARY_CELL = 3
 def clamp(x, a, b):
     return min(max(x, a), b)
 
-
-
 # ANCHOR: sim_setup
 # simulation setup
 side_len = 0.45
-rho = 1000      # density of square
+rho = 1      # density of square
 E = 1e5         # Young's modulus
 nu = 0.4        # Poisson's ratio
 n_seg = 2       # num of segments per side of the square
 
-# DBC = [(n_seg + 1) * (n_seg + 1) * 2]   # dirichlet node index
-# DBC_v = [np.array([0.0, -0.5])]         # dirichlet node velocity
-# DBC_limit = [np.array([0.0, -0.7])]     # dirichlet node limit position
 ground_n = np.array([0.0, 1.0])         # normal of the slope
 ground_n /= np.linalg.norm(ground_n)    # normalize ground normal vector just in case
 ground_o = np.array([0.0, 75.0])        # a point on the slope  
@@ -45,32 +39,48 @@ left_o = np.array([50.0, 0.0])         # a point on the left wall
 
 right_n = np.array([-1.0, 0.0])         # normal of the right wall
 right_n /= np.linalg.norm(right_n)      # normalize right wall normal vector just in case
-right_o = np.array([150.0, 0.0])         # a point on the right wall
+right_o = np.array([150.0, 0.0])        # a point on the right wall
 
 use_DBC = False
 
-if(use_DBC):
+if use_DBC:
     DBC = [(n_seg + 1) * (n_seg + 1) * 2]   # dirichlet node index
     DBC_v = [np.array([0.0, -0.5])]         # dirichlet node velocity
     DBC_limit = [np.array([0.0, -0.7])]     # dirichlet node limit position
-
 
 mu = 0.4        # friction coefficient of the slope
 
 print("ground_n: ", ground_n)
 print("ground_o: ", ground_o) 
 
-
-
-#fluid setup
-
+# fluid setup
 rho = 1000 # density
-gravity = [0.0, -9.8]
-
+gravity = [0.0, -500]
 
 width = 200
 height = 200
 depth = 1
+
+def make_hexagon(center, radius):
+    return [center + radius * np.array([np.cos(θ), np.sin(θ)]) for θ in np.linspace(0, 2 * np.pi, 7)[:-1]]
+
+# boundary shapes
+shape = None
+
+diamond_vertices = []
+diamond_edges = []
+hex1_vertices = []
+hex2_vertices = []
+hex_edges = []
+circles = []
+
+def point_to_segment_distance(p, a, b):
+    ab = b - a
+    t = np.dot(p - a, ab) / np.dot(ab, ab)
+    t = clamp(t, 0.0, 1.0)
+    closest = a + t * ab
+    dist_vec = p - closest
+    return dist_vec, np.linalg.norm(dist_vec)
 
 f_spacing = 10
 f_num_X = int(width / f_spacing) + 1
@@ -82,8 +92,7 @@ f_num_cells = f_num_X * f_num_Y
 
 print(f_num_X, f_num_Y, h, f_num_cells)
 
-dt = 0.05
-
+dt = 0.005
 
 # grid setup
 u = [0.0] * f_num_cells
@@ -102,18 +111,13 @@ cell_color = [0.0] * f_num_cells
 num_fluid_cells = 0
 num_boundary_cells = 0
 
-
 # particle setup
 max_particles = 1000
 particle_pos = np.array([[0.0, 0.0]] * max_particles)
 particle_vel = np.array([[0.0, 0.0]] * max_particles)
 
-
-# particle_type = [0] * num_particles
-# particle_color = [0.0, 0.0, 0.0] * num_particles
 particle_density = [0.0] * f_num_cells
 particle_rest_density = 0.0
-
 
 particle_radius = 0.2 * h
 particle_mass = 0.8 * particle_radius * particle_radius * particle_radius * rho
@@ -123,7 +127,6 @@ p_inv_spacing = 1.0 / dx
 p_num_X = int(width * p_inv_spacing) + 1
 p_num_Y = int(height * p_inv_spacing) + 1
 p_num_Z = int(depth * p_inv_spacing) + 1 # not used
-
 
 p_num_cells = p_num_X * p_num_Y 
 
@@ -135,13 +138,12 @@ max_particles_per_cell = 100
 [xtmp] = particles.generate(50, dx)
 num_particles = len(xtmp)
 for i in range(num_particles):
-    if(i < max_particles):
-        particle_pos[i] = (xtmp[i]) + [width / 2, height / 2]
+    if i < max_particles:
+        particle_pos[i] = (xtmp[i]) + [width / 2, height - 25]
     else:
         break
 
-particle_vel = particles.perturb(particle_vel, 0.1)
-
+particle_vel = particles.perturb(particle_vel, 0.5)
 
 def integrateParticles(dt, gravity):
     global particle_pos, particle_vel, num_particles, width, height, ground_o, ground_n
@@ -155,7 +157,6 @@ def integrateParticles(dt, gravity):
 
         x = particle_pos[i][0]
         y = particle_pos[i][1]
-        # particle_pos[i][2] = 0.0
 
         if x < left_o[0]:
             particle_pos[i][0] = left_o[0]
@@ -169,12 +170,47 @@ def integrateParticles(dt, gravity):
         if y >= height:
             particle_pos[i][1] = height
             particle_vel[i][1] = 0.0
+        
+        if shape == 1:
+            # boundary conditions for diamond
+            for edge_start, edge_end in diamond_edges:
+                dist_vec, dist = point_to_segment_distance(particle_pos[i], edge_start, edge_end)
+                if dist < particle_radius:
+                    push_vec = dist_vec / (dist + 1e-6) * (particle_radius - dist)
+                    particle_pos[i] += push_vec
+                    edge_dir = edge_end - edge_start
+                    edge_normal = np.array([-edge_dir[1], edge_dir[0]])
+                    edge_normal /= np.linalg.norm(edge_normal)
+                    particle_vel[i] -= np.dot(particle_vel[i], edge_normal) * edge_normal
+        elif shape == 2:
+            # boundary conditions for hexagons
+            for edge_start, edge_end in hex_edges:
+                dist_vec, dist = point_to_segment_distance(particle_pos[i], edge_start, edge_end)
+                if dist < particle_radius:
+                    push_vec = dist_vec / (dist + 1e-6) * (particle_radius - dist)
+                    particle_pos[i] += push_vec
+                    edge_dir = edge_end - edge_start
+                    edge_normal = np.array([-edge_dir[1], edge_dir[0]])
+                    edge_normal /= np.linalg.norm(edge_normal)
+                    particle_vel[i] -= np.dot(particle_vel[i], edge_normal) * edge_normal
+        elif shape == 3:
+            # boundary conditions for circles
+            for center, radius in circles:
+                vec_to_center = particle_pos[i] - center
+                dist = np.linalg.norm(vec_to_center)
+                if dist < radius + particle_radius:
+                    if dist == 0:
+                        normal = np.array([1.0, 0.0])
+                    else:
+                        normal = vec_to_center / dist
+                    overlap = (radius + particle_radius) - dist
+                    particle_pos[i] += normal * overlap
+                    particle_vel[i] -= np.dot(particle_vel[i], normal) * normal
 
 def pushParticlesApart(num_iterations):
     global particle_pos, num_particles, p_num_X, p_num_Y, p_inv_spacing, p_num_cells, particle_radius
     global num_cell_particles, first_cell_particle, cell_particle
 
-    # Count per cell
     num_cell_particles = [0] * p_num_cells
     for i in range(num_particles):
         x = particle_pos[i]
@@ -182,17 +218,13 @@ def pushParticlesApart(num_iterations):
         yi = clamp(int(x[1] * p_inv_spacing), 0, p_num_Y - 1)
         num_cell_particles[xi * p_num_Y + yi] += 1
     
-    # partial sum
-
     first = 0
-
     for i in range(p_num_cells):
         first += num_cell_particles[i]
         first_cell_particle[i] = first
     
-    first_cell_particle[p_num_cells] = first # total number of particles
+    first_cell_particle[p_num_cells] = first
 
-    # sort particles
     for i in range(num_particles):
         x = particle_pos[i]
         xi = clamp(int(x[0] * p_inv_spacing), 0, p_num_X - 1)
@@ -202,7 +234,6 @@ def pushParticlesApart(num_iterations):
         cell_particle[index] = i
         first_cell_particle[cell] -= 1
 
-    # push particles apart
     min_dist = 2.0 * particle_radius
     min_dist2 = min_dist * min_dist
 
@@ -232,26 +263,19 @@ def pushParticlesApart(num_iterations):
                                 p1[1] -= d[1] * diff
                                 p2[0] += d[0] * diff
                                 p2[1] += d[1] * diff
-
                                 particle_pos[i] = p1
                                 particle_pos[id] = p2
-
-    
-
-
-
 
 def transferVelocities(toGrid, flipRatio):
     global u, v, du, dv, prev_U, prev_V, cell_type, particle_pos, particle_vel
     global num_particles, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
-    global num_fluid_cells, num_boundary_cells, boundary_cells
+    global num_fluid_cells, num_boundary_cells
 
     n = f_num_Y
-    # h = f_spacing
     h_1 = f_inv_spacing
     h_2 = 0.5 * h
 
-    if(toGrid):
+    if toGrid:
         prev_U = u
         prev_V = v
         du = [0.0] * f_num_cells
@@ -271,25 +295,23 @@ def transferVelocities(toGrid, flipRatio):
             xi = clamp(int(x * h_1), 0, f_num_X - 1)
             yi = clamp(int(y * h_1), 0, f_num_Y - 1)
             cell_num = xi * n + yi
-
-            # print(cell_num, f_num_cells, len(cell_type))
             
-            if (cell_type[cell_num] == AIR_CELL):
+            if cell_type[cell_num] == AIR_CELL:
                 cell_type[cell_num] = FLUID_CELL
                 num_fluid_cells += 1
-                # cell_color[cell_num] = 1.0
         for i in range(f_num_cells):
             if cell_type[i] == FLUID_CELL:
-                #check for boundary cells
                 x0 = i - n
                 x1 = i + n
                 y0 = i - 1
                 y1 = i + 1
-                if (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
-                    cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
-                    cell_type[i] = FLUID_BOUNDARY_CELL
-                    num_boundary_cells += 1
-
+                if x0 >= 0 and x1 < f_num_cells and y0 >= 0 and y1 < f_num_cells:
+                    if (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or
+                        cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
+                        cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or
+                        cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
+                        cell_type[i] = FLUID_BOUNDARY_CELL
+                        num_boundary_cells += 1
             
     for component in [0,1]:
         dx = 0.0 if component == 0 else h_2
@@ -303,16 +325,16 @@ def transferVelocities(toGrid, flipRatio):
             x = particle_pos[i][0]
             y = particle_pos[i][1]
 
-            x = clamp(int(x * h_1), 0, p_num_X - 1)
-            y = clamp(int(y * h_1), 0, p_num_Y - 1)
+            x = clamp(x * h_1, 0, f_num_X - 1)
+            y = clamp(y * h_1, 0, f_num_Y - 1)
 
-            x0 = min(int((x-dx) * h_1), p_num_X - 2)
+            x0 = min(int((x-dx) * h_1), f_num_X - 2)
             tx = ((x - dx) - x0 * h) * h_1
-            x1 = min(x0 + 1, p_num_X - 2)
+            x1 = min(x0 + 1, f_num_X - 2)
 
-            y0 = min(int((y-dy) * h_1), p_num_Y - 2)
+            y0 = min(int((y-dy) * h_1), f_num_Y - 2)
             ty = ((y - dy) - y0 * h) * h_1
-            y1 = min(y0 + 1, p_num_Y - 2)
+            y1 = min(y0 + 1, f_num_Y - 2)
 
             sx = 1.0 - tx
             sy = 1.0 - ty
@@ -340,10 +362,10 @@ def transferVelocities(toGrid, flipRatio):
 
             else:
                 offset = n if component == 0 else 1
-                valid0 = 1.0 if cell_type[nr0] != AIR_CELL or cell_type[nr0 - offset] != AIR_CELL else 0.0
-                valid1 = 1.0 if cell_type[nr1] != AIR_CELL or cell_type[nr1 - offset] != AIR_CELL else 0.0
-                valid2 = 1.0 if cell_type[nr2] != AIR_CELL or cell_type[nr2 - offset] != AIR_CELL else 0.0
-                valid3 = 1.0 if cell_type[nr3] != AIR_CELL or cell_type[nr3 - offset] != AIR_CELL else 0.0
+                valid0 = 1.0 if (nr0 >= 0 and (cell_type[nr0] != AIR_CELL or (nr0 - offset >= 0 and cell_type[nr0 - offset] != AIR_CELL))) else 0.0
+                valid1 = 1.0 if (nr1 >= 0 and (cell_type[nr1] != AIR_CELL or (nr1 - offset >= 0 and cell_type[nr1 - offset] != AIR_CELL))) else 0.0
+                valid2 = 1.0 if (nr2 >= 0 and (cell_type[nr2] != AIR_CELL or (nr2 - offset >= 0 and cell_type[nr2 - offset] != AIR_CELL))) else 0.0
+                valid3 = 1.0 if (nr3 >= 0 and (cell_type[nr3] != AIR_CELL or (nr3 - offset >= 0 and cell_type[nr3 - offset] != AIR_CELL))) else 0.0
 
                 vel = particle_vel[i][component]
                 d = valid0 * d0 + valid1 * d1 + valid2 * d2 + valid3 * d3
@@ -368,7 +390,6 @@ def transferVelocities(toGrid, flipRatio):
         for i in range(len(f)):
             if df[i] > 0.0:
                 f[i] /= df[i]
-        # restore solid cells
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * n + j
@@ -377,16 +398,12 @@ def transferVelocities(toGrid, flipRatio):
                 if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-1] == SOLID_CELL):
                     v[c] = prev_V[c]
 
-
 def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
 
     p = [0.0] * f_num_cells
     
-    u3 = u
-    v3 = v
-
     n = f_num_Y
     cp = rho * h / dt
 
@@ -394,7 +411,7 @@ def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift)
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * n + j
-                if cell_type == AIR_CELL or cell_type[c] == SOLID_CELL:
+                if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
                     continue
 
                 left = (i - 1) * n + j
@@ -402,20 +419,19 @@ def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift)
                 bottom = i * n + j - 1
                 top = i * n + j + 1
 
-                # s0 = s[c]
-                sx0 = s[left]
-                sx1 = s[right]
-                sy0 = s[bottom]
-                sy1 = s[top]
+                sx0 = s[left] if left >= 0 else 0.0
+                sx1 = s[right] if right < f_num_cells else 0.0
+                sy0 = s[bottom] if bottom >= 0 else 0.0
+                sy1 = s[top] if top < f_num_cells else 0.0
 
                 this_s = sx0 + sx1 + sy0 + sy1
                 if this_s == 0.0:
                     continue
 
-                div = u[right] - u[c] + v[top] - v[c]
-                # div *= 1.9
+                div = (u[right] if right < f_num_cells else 0.0) - (u[c] if c < f_num_cells else 0.0) + \
+                      (v[top] if top < f_num_cells else 0.0) - (v[c] if c < f_num_cells else 0.0)
 
-                if(particle_rest_density > 0.0 and compensateDrift):
+                if particle_rest_density > 0.0 and compensateDrift:
                     k = 10000.0
                     compression = particle_density[c] - particle_rest_density
                     if compression > 0.0:
@@ -423,12 +439,16 @@ def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift)
 
                 this_p = -div / this_s
                 this_p *= over_relaxation
-                p[c] += (this_p * cp) # pressure
-                u[c] -= (this_p * sx0)
-                u[right] += (this_p * sx1)
-                v[c] -= (this_p * sy0)
-                v[top] += (this_p * sy1)
-                    
+                p[c] += (this_p * cp)
+                if c < f_num_cells:
+                    u[c] -= (this_p * sx0)
+                if right < f_num_cells:
+                    u[right] += (this_p * sx1)
+                if c < f_num_cells:
+                    v[c] -= (this_p * sy0)
+                if top < f_num_cells:
+                    v[top] += (this_p * sy1)
+
 def updateParticleDensity():
     global particle_density, particle_rest_density, particle_pos, num_particles
     global f_num_X, f_num_Y, h, f_inv_spacing, f_num_cells, cell_type
@@ -458,27 +478,27 @@ def updateParticleDensity():
         sx = 1.0 - tx
         sy = 1.0 - ty
 
-        if (x0 < f_num_X and y0 < f_num_Y):
+        if x0 < f_num_X and y0 < f_num_Y:
             d[x0 * n + y0] += sx * sy
-        if (x1 < f_num_X and y0 < f_num_Y):
+        if x1 < f_num_X and y0 < f_num_Y:
             d[x1 * n + y0] += tx * sy
-        if (x1 < f_num_X and y1 < f_num_Y):
+        if x1 < f_num_X and y1 < f_num_Y:
             d[x1 * n + y1] += tx * ty
-        if (x0 < f_num_X and y1 < f_num_Y):
+        if x0 < f_num_X and y1 < f_num_Y:
             d[x0 * n + y1] += sx * ty
 
-    if(particle_rest_density == 0.0):
+    if particle_rest_density == 0.0:
         sum = 0.0
         for i in range(f_num_cells):
             if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
                 sum += d[i]
         if num_fluid_cells > 0:
-                particle_rest_density = sum / num_fluid_cells
+            particle_rest_density = sum / num_fluid_cells
         print('rest density', particle_rest_density)
 
     particle_density = d
 
-def advection(): # Advection step u1 = u0(x - u0(x)*dt)
+def advection():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
     
@@ -494,11 +514,6 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
             if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
                 continue
 
-            left = (i - 1) * f_num_Y + j
-            right = (i + 1) * f_num_Y + j
-            bottom = i * f_num_Y + j - 1
-            top = i * f_num_Y + j + 1
-
             x = i * h + 0.5 * h
             y = j * h + 0.5 * h
 
@@ -510,7 +525,6 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
     u = u1
     v = v1
 
-
 def externalForces():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
@@ -519,11 +533,6 @@ def externalForces():
         if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
             u[i] += gravity[0] * dt
             v[i] += gravity[1] * dt
-
-    # for i in range(len(ground_n)):
-    #     if cell_type[i] == FLUID_CELL:
-    #         u[i] += ground_n[0] * dt
-    #         v[i] += ground_n[1] * dt
 
 def projection():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -535,34 +544,19 @@ def projection():
     u4 = [0.0] * f_num_cells
     v4 = [0.0] * f_num_cells
 
-    #Want u4 and v4 to be the divergence of u3 and v3
     grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
-    # grad_p = np.array([0.0, 0.0]) * f_num_cells
-
 
 def simulate():
     global u, v, prev_U, prev_V, dt, gravity
-    integrateParticles(dt, gravity) # step forward in time
-    pushParticlesApart(20)
-
-    transferVelocities(True, 0.9)
-
-    # On grid:
+    integrateParticles(dt, gravity)
+    pushParticlesApart(10)
+    transferVelocities(True, 0.95)
     prev_U = u
     prev_V = v
     updateParticleDensity()
     advection()
-    # externalForces()
-    # diffusion() # solving for viscosity
-    solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
-    # projection()
-
-    transferVelocities(False, 0.9)
-
-    # setBoundaryConditions()
-    # updateParticles()
-
-
+    solveIncompressibility(100, dt, 1.9, False)
+    transferVelocities(False, 0.95)
 
 # Set solid cells
 for i in range(f_num_X):
@@ -572,7 +566,6 @@ for i in range(f_num_X):
         x2 = [(i + 1) * h, j * h]
         x3 = [(i + 1) * h, (j + 1) * h]
         x4 = [i * h, (j + 1) * h]
-        # x - o dot n < 0
         c1_g = (x1[0] - ground_o[0]) * ground_n[0] + (x1[1] - ground_o[1]) * ground_n[1]
         c2_g = (x2[0] - ground_o[0]) * ground_n[0] + (x2[1] - ground_o[1]) * ground_n[1]
         c3_g = (x3[0] - ground_o[0]) * ground_n[0] + (x3[1] - ground_o[1]) * ground_n[1]
@@ -598,11 +591,10 @@ for i in range(f_num_X):
 
 # simulation with visualization
 resolution = np.array([600, 600])
-offset = [0.0,0.0]
+offset = [0.0, 0.0]
 scale = max(resolution / [width, height])
 def screen_projection(x):
     return [offset[0] + scale * x[0], resolution[1] - (offset[1] + scale * x[1])]
-
 
 time_step = 0
 max_time_step = 200
@@ -612,11 +604,9 @@ show_numbers = False
 calc_KE = False
 particles.write_to_file(time_step, particle_pos, num_particles)
 screen = pygame.display.set_mode(resolution)
-# display_surface = pygame.display.set_mode((width, height))
 running = True
 paused = False
 while running and __name__ == "__main__":
-    # run until the user asks to quit
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -633,65 +623,117 @@ while running and __name__ == "__main__":
                 show_numbers = not show_numbers
             if event.key == pygame.K_k:
                 calc_KE = not calc_KE
+            if event.key == pygame.K_1:
+                shape = 1  # diamond
+            if event.key == pygame.K_2:
+                shape = 2  # hexagons
+            if event.key == pygame.K_3:
+                shape = 3  # circles
+
 
     if paused:
         pygame.time.wait(int(dt * 1000))
         continue
     
     print('### Time step', time_step, '###')
-
-    # fill the background and draw the square
     screen.fill((255, 255, 255))
 
-    #draw grid
-    if(draw_cells):
+    if draw_cells:
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * f_num_Y + j
                 if cell_type[c] == AIR_CELL:
-                    # print('air cell', c)
-                    pygame.draw.rect(screen, (255, 255, 255), (screen_projection([i * h, (j+1) * h]), [scale * h, scale *h]))
+                    pygame.draw.rect(screen, (255, 255, 255), (screen_projection([i * h, (j+1) * h]), [scale * h, scale * h]))
                 elif cell_type[c] == FLUID_CELL:
-                    # print('fluid cell', c)
-                    pygame.draw.rect(screen, (20, 20, 170), (screen_projection([i * h, (j+1) * h]), [scale * h, scale *h]))
+                    pygame.draw.rect(screen, (20, 20, 170), (screen_projection([i * h, (j+1) * h]), [scale * h, scale * h]))
                 elif cell_type[c] == FLUID_BOUNDARY_CELL:
-                    # print('fluid boundary cell', c)
-                    pygame.draw.rect(screen, (50, 50, 200), (screen_projection([i * h, (j+1) * h]), [scale * h, scale *h]))
+                    pygame.draw.rect(screen, (50, 50, 200), (screen_projection([i * h, (j+1) * h]), [scale * h, scale * h]))
                 elif cell_type[c] == SOLID_CELL:
-                    # print('solid cell', c)
                     pygame.draw.rect(screen, (0, 150, 0), (screen_projection([i * h, (j+1) * h]), [scale * h, scale * h]))
-                
-        
     
-    if(draw_grid):
+    if draw_grid:
         for i in range(f_num_X):
             pygame.draw.aaline(screen, (80, 80, 0), screen_projection([i * h, 0]), screen_projection([i * h, height]))
         for j in range(f_num_Y):
             pygame.draw.aaline(screen, (80, 80, 0), screen_projection([0, j * h]), screen_projection([width, j * h]))
-    if(show_numbers):        
+    
+    if show_numbers:        
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * f_num_Y + j
                 text = pygame.font.Font(None, 20).render(str(c), True, (0, 0, 0))
                 textRect = text.get_rect()
-                textRect.center = (screen_projection([(i+ 0.5) * h, (j + 0.5) * h]))
+                textRect.center = (screen_projection([(i + 0.5) * h, (j + 0.5) * h]))
                 screen.blit(text, textRect)
 
-    # pygame.draw.circle(screen, (255, 0, 0), screen_projection([0, 0]), 2 * scale)  # draw a red circle
-    pygame.draw.aaline(screen, (255, 0, 255), screen_projection([0,ground_o[1]]), screen_projection([width, ground_o[1]]))   # ground 
+    pygame.draw.aaline(screen, (255, 0, 255), screen_projection([0, ground_o[1]]), screen_projection([width, ground_o[1]]))   # ground 
     pygame.draw.aaline(screen, (255, 0, 255), screen_projection([left_o[0], 0]), screen_projection([left_o[0], height]))   # left wall
     pygame.draw.aaline(screen, (255, 0, 255), screen_projection([right_o[0], 0]), screen_projection([right_o[0], height]))   # right wall
+    
+    # boundary shape initialization
+    if shape == 1:
+        diamond_center = np.array([width / 2, ground_o[1] + 50])
+        diamond_size = 20 / np.sqrt(2)
+        diamond_vertices = [
+            diamond_center + [0, diamond_size],
+            diamond_center + [diamond_size, 0],
+            diamond_center + [0, -diamond_size],
+            diamond_center + [-diamond_size, 0]
+        ]
+        diamond_edges = [
+            (diamond_vertices[0], diamond_vertices[1]),
+            (diamond_vertices[1], diamond_vertices[2]),
+            (diamond_vertices[2], diamond_vertices[3]),
+            (diamond_vertices[3], diamond_vertices[0])
+        ]
 
-    # draw particles
+        for k in range(4):
+            pygame.draw.aaline(screen, (255, 0, 0), screen_projection(diamond_vertices[k]), screen_projection(diamond_vertices[(k+1)%4]))
+    elif shape == 2:
+        hex_radius = 10
+        hex1_center = np.array([80.0, 130.0])
+        hex2_center = np.array([120.0, 130.0])
+        hex1_vertices = make_hexagon(hex1_center, hex_radius)
+        hex2_vertices = make_hexagon(hex2_center, hex_radius)
+        hex_edges = []
+        for verts in [hex1_vertices, hex2_vertices]:
+            for i in range(len(verts)):
+                a = verts[i]
+                b = verts[(i + 1) % len(verts)]
+                hex_edges.append((a, b))
+
+        for hexagon in [hex1_vertices, hex2_vertices]:
+            for i in range(len(hexagon)):
+                pygame.draw.aaline(
+                    screen,
+                    (255, 0, 0),
+                    screen_projection(hexagon[i]),
+                    screen_projection(hexagon[(i + 1) % len(hexagon)])
+                )
+    elif shape == 3:
+        circle1_center = np.array([80.0, 130.0])
+        circle2_center = np.array([120.0, 100.0])
+        circle_radius = 12.0
+        circles = [(circle1_center, circle_radius), (circle2_center, circle_radius)]
+
+        for center, radius in circles:
+            pygame.draw.circle(
+                screen,
+                (255, 0, 0),
+                screen_projection(center),
+                radius * scale,
+                width=1
+            )
+
+    # Draw particles
     for xId in range(0, num_particles):
         xI = particle_pos[xId]
         pygame.draw.circle(screen, (0, 0, 255), screen_projection(xI), particle_radius * scale)
 
-    pygame.display.flip()   # flip the display
+    pygame.display.flip()
 
-    # step forward simulation and wait for screen refresh
     simulate()
-    if(calc_KE):
+    if calc_KE:
         ke = energy.kineticEnergy(particle_mass, particle_vel)
         print('Kinetic energy:', ke)
 
