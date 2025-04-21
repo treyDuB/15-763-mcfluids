@@ -23,7 +23,6 @@ def clamp(x, a, b):
     return min(max(x, a), b)
 
 
-
 # ANCHOR: sim_setup
 # simulation setup
 side_len = 0.45
@@ -81,6 +80,16 @@ f_num_cells = f_num_X * f_num_Y
 
 print(f_num_X, f_num_Y, h, f_num_cells)
 
+# grid navigation helpers
+def left(i, j):
+    return ((i-1)*f_num_Y+j) % f_num_X
+def right(i, j):
+    return ((i+1)*f_num_Y+j) % f_num_X
+def bottom(i, j):
+    return (i*f_num_Y+j-1) % f_num_Y
+def top(i, j):
+    return (i*f_num_Y+j+1) % f_num_Y
+
 dt = 0.05
 
 
@@ -101,6 +110,9 @@ cell_color = [0.0] * f_num_cells
 num_fluid_cells = 0
 num_boundary_cells = 0
 
+# store indices of fluid / boundary cells into the cell grid
+fluid_cells    : list[int] = []
+boundary_cells : list[int] = []
 
 # particle setup
 max_particles = 1000
@@ -243,7 +255,7 @@ def pushParticlesApart(num_iterations : int):
 def transferVelocities(toGrid : bool, flipRatio : float):
     global u, v, du, dv, prev_U, prev_V, cell_type, particle_pos, particle_vel
     global num_particles, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
-    global num_fluid_cells, num_boundary_cells, boundary_cells
+    global num_fluid_cells, num_boundary_cells, boundary_cells, fluid_cells
 
     n = f_num_Y
     # h = f_spacing
@@ -260,6 +272,8 @@ def transferVelocities(toGrid : bool, flipRatio : float):
 
         num_fluid_cells = 0
         num_boundary_cells = 0
+        fluid_cells = []
+        boundary_cells = []
 
         for i in range(f_num_cells):
             cell_type[i] = SOLID_CELL if s[i] == 0.0 else AIR_CELL
@@ -276,6 +290,7 @@ def transferVelocities(toGrid : bool, flipRatio : float):
             if (cell_type[cell_num] == AIR_CELL):
                 cell_type[cell_num] = FLUID_CELL
                 num_fluid_cells += 1
+                fluid_cells.append(cell_num)
                 # cell_color[cell_num] = 1.0
         for i in range(f_num_cells):
             if cell_type[i] == FLUID_CELL:
@@ -288,6 +303,9 @@ def transferVelocities(toGrid : bool, flipRatio : float):
                     cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
                     cell_type[i] = FLUID_BOUNDARY_CELL
                     num_boundary_cells += 1
+                    num_fluid_cells += 1
+                    boundary_cells.append(i)
+                    fluid_cells.append(i)
 
             
     for component in [0,1]:
@@ -396,22 +414,22 @@ def solveIncompressibility(num_iterations : int, dt : float, over_relaxation : f
                 if cell_type == AIR_CELL or cell_type[c] == SOLID_CELL:
                     continue
 
-                left = (i - 1) * n + j
-                right = (i + 1) * n + j
-                bottom = i * n + j - 1
-                top = i * n + j + 1
+                left = left(i,j)
+                right = right(i,j)
+                bottom = bottom(i,j)
+                top = top(i,j)
 
                 # s0 = s[c]
-                sx0 = s[left]
-                sx1 = s[right]
-                sy0 = s[bottom]
-                sy1 = s[top]
+                sx0 : float = s[left]
+                sx1 : float = s[right]
+                sy0 : float = s[bottom]
+                sy1 : float = s[top]
 
                 this_s = sx0 + sx1 + sy0 + sy1
                 if this_s == 0.0:
                     continue
 
-                div = u[right] - u[c] + v[top] - v[c]
+                div : float = u[right] - u[c] + v[top] - v[c]
                 # div *= 1.9
 
                 if(particle_rest_density > 0.0 and compensateDrift):
@@ -493,11 +511,6 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
             if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
                 continue
 
-            left = (i - 1) * f_num_Y + j
-            right = (i + 1) * f_num_Y + j
-            bottom = i * f_num_Y + j - 1
-            top = i * f_num_Y + j + 1
-
             x = i * h + 0.5 * h
             y = j * h + 0.5 * h
 
@@ -538,79 +551,126 @@ def projection():
     grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
     # grad_p = np.array([0.0, 0.0]) * f_num_cells
 
-def left(i, j):
-    return ((i-1)*f_num_Y+j) % f_num_X
-def right(i, j):
-    return ((i+1)*f_num_Y+j) % f_num_X
-def bottom(i, j):
-    return (i*f_num_Y+(j-1)) % f_num_Y
-def top(i, j):
-    return (i*f_num_Y+(j+1)) % f_num_Y
-
 def pressureProjectionMC(num_samples : int):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
 
     n = [0., 0.] # unit normal facing out of the boundary
 
-    # these are incorrect rn; need to find number of FLUID interior/boundary cells
-    P_V = 1. / num_fluid_cells
-    P_A = 1. / num_boundary_cells
+    # PDF's of sampling points on the interior and boundary respectively.
+    # f_spacing**2 is the area of each cell?
+    P_V = 1. / num_fluid_cells / f_spacing / f_spacing
+    # boundary PDF is updated later depending on whether grid cell is a corner
+    # or edge or completely surrounded or whatever.
+
+    ADJ_LEFT   = False
+    ADJ_RIGHT  = False
+    ADJ_TOP    = False
+    ADJ_BOTTOM = False
+    num_adj_walls = 0
 
     for i in range(f_num_X):
         for j in range(f_num_Y):
             c = i * f_num_Y + j
-            if cell_type != FLUID_CELL:
+            # print("cell type of", c, ":", cell_type[c])
+            if (cell_type[c] != FLUID_CELL and cell_type[c] != FLUID_BOUNDARY_CELL):
                 continue
             
-            E_V = 0. # accumulates interior samples
-            E_A = 0. # accumulates boundary samples
+            E_V = np.array([0.,0.]) # accumulates interior samples
+            E_A = np.array([0.,0.]) # accumulates boundary samples
 
-            cell_pt = [i * f_spacing, j * f_spacing]
+            cell_pt = np.array([i * f_spacing, j * f_spacing])
 
-            for _ in range(num_samples):
+            for sample in range(num_samples):
+                # print("## Sample", sample, "##")
+                P_A = 1. / num_boundary_cells / f_spacing
 
-                sample_in = np.random.randint(0, f_num_cells) # in for interior
-                sample_bd = np.random.randint(0, f_num_cells) # bd for boundary
+                sample_in : int = fluid_cells[np.random.randint(0, num_fluid_cells)] # in for interior
+                sample_bd : int = boundary_cells[np.random.randint(0, num_boundary_cells)] # bd for boundary
                 [sbd_x, sbd_y] = [int(np.floor(sample_bd / f_num_Y)), sample_bd % f_num_Y]
-                # rejection sampling I Guess
-                while cell_type[sample_in] != FLUID_CELL:
-                    sample_in = np.random.randint(0, f_num_cells)
+                # # rejection sampling I Guess
+                # while cell_type[sample_in] != FLUID_CELL:
+                #     sample_in = np.random.randint(0, f_num_cells)
                 # not to be confused with sine
                 [sin_x, sin_y] = [int(np.floor(sample_in / f_num_Y)), sample_in % f_num_Y]
 
-                while (cell_type[sample_b] != FLUID_CELL or
-                     (left(sbd_x, sbd_y) == FLUID_CELL and right(sbd_x, sbd_y) == FLUID_CELL
-                      and top(sbd_x, sbd_y) == FLUID_CELL and bottom(sbd_x, sbd_y) == FLUID_CELL)):
-                    sample_b = np.random.randint(0, f_num_cells)
-                    [sbd_x, sbd_y] = [int(np.floor(sample_b / f_num_Y)), sample_b % f_num_Y]
+                # while (cell_type[sample_b] != FLUID_CELL or
+                #      (left(sbd_x, sbd_y) == FLUID_CELL and right(sbd_x, sbd_y) == FLUID_CELL
+                #       and top(sbd_x, sbd_y) == FLUID_CELL and bottom(sbd_x, sbd_y) == FLUID_CELL)):
+                #     sample_b = np.random.randint(0, f_num_cells)
+                #     [sbd_x, sbd_y] = [int(np.floor(sample_b / f_num_Y)), sample_b % f_num_Y]
                 
-                if (left(sbd_x, sbd_y) != FLUID_CELL):
-                    n = [-1., 0.]
-                elif (right(sbd_x, sbd_y) != FLUID_CELL):
-                    n = [1., 0.]
-                elif (top(sbd_x, sbd_y) != FLUID_CELL):
-                    n = [0., 1.]
-                elif (bottom(sbd_x, sbd_y) != FLUID_CELL):
-                    n = [0., -1.]
-                else:
-                    print("This shouldn't happen :(")
-                    n = [0., 0.]
-                
-                in_pt = [sin_x * f_spacing, sin_y * f_spacing]
-                # not to be confused with bidirectional path tracing
-                bd_pt = [sbd_x * f_spacing, sbd_y * f_spacing]
+                # (float) sample a location within the cell
+                in_pt = ( np.array([sin_x * f_spacing, sin_y * f_spacing])
+                        + np.array([np.random.uniform(0, f_spacing), np.random.uniform(0, f_spacing)]) )
 
-                E_V += functions.S_2D(cell_pt, in_pt) / P_V * [u[sample_in]-u[c], v[sample_in]-v[c]]
-                E_A += np.dot(functions.grad_G_2D(cell_pt, bd_pt) / P_A * n, [u[sample_bd]-u[c], v[sample_bd]-v[c]])
+                # not to be confused with bidirectional path tracing
+                # we will sample a location on the edge of a grid cell,
+                # but first need to determine which edges are boundaries
+                # of the fluid domain
+                bd_pt = np.array([sbd_x * f_spacing, sbd_y * f_spacing]).astype(np.float64)
+
+                if (left(sbd_x, sbd_y) != FLUID_CELL):
+                    ADJ_LEFT = True
+                    num_adj_walls += 1
+                if (right(sbd_x, sbd_y) != FLUID_CELL):
+                    ADJ_RIGHT = True
+                    num_adj_walls += 1
+                if (top(sbd_x, sbd_y) != FLUID_CELL):
+                    ADJ_TOP = True
+                    num_adj_walls += 1
+                if (bottom(sbd_x, sbd_y) != FLUID_CELL):
+                    ADJ_BOTTOM = True
+                    num_adj_walls += 1
+                
+                bd_offset = np.random.uniform(0, f_spacing)
+                if (num_adj_walls == 0):
+                    print("this shouldn't happen :(")
+                    n = [0., 0.]
+                    bd_pt = np.array([0.,0.])
+                
+                # sorry this is a bit convoluted/weird
+                elif (num_adj_walls >= 2):
+                    # first pick a wall to sample on (by "turning off" all other walls)
+                    wall = np.random.randint(0, 4)
+                    adj_walls = [ADJ_LEFT, ADJ_RIGHT, ADJ_TOP, ADJ_BOTTOM]
+                    while not adj_walls[wall]:
+                        wall = np.random.randint(0, 4)
+                    for w in range(len(adj_walls)):
+                        if w != wall: adj_walls[w] = False
+
+                    # update pdf
+                    # (we can still use num_adj_walls because it was not updated)
+                    # (after "turning off") all the other walls
+                    P_A /= num_adj_walls
+                
+                # then proceed as though we just have one adjacent wall
+                bd_pt += np.array([float(ADJ_RIGHT), float(ADJ_TOP)]) * f_spacing
+                bd_pt += np.array([float(ADJ_BOTTOM or ADJ_TOP), float(ADJ_LEFT or ADJ_RIGHT)]) * bd_offset
+
+                # define normal
+                # i'm so silly with booleans
+                n[int(ADJ_TOP or ADJ_BOTTOM)] = (-1)**int(ADJ_LEFT or ADJ_BOTTOM)
+                # print("n =",n)
+
+                S = functions.S_2D(cell_pt, in_pt) / P_V
+                grad_G = functions.grad_G_x_2D(cell_pt, bd_pt)
+                # print("S =", S)
+                # print("grad_G =", grad_G)
+                # print("PDFs: P_V =", P_V, "P_A =", P_A)
+                E_V += np.dot(S, np.array([u[sample_in]-u[c], v[sample_in]-v[c]]).transpose())
+                E_A += grad_G / P_A * np.dot(n, np.array([u[sample_bd]-u[c], v[sample_bd]-v[c]]))
+                # print("Estimators: E_V =", E_V, "E_A =", E_A)
 
             E_V *= 1. / num_samples 
             E_A *= 1. / num_samples
             p_grad = E_V + E_A
-            u[c] -= p_grad
-            u[right] += p_grad
-            v[c] -= p_grad
-            v[top] += p_grad
+            u[c] -= p_grad[0]
+            u[right(i,j)] += p_grad[0]
+            v[c] -= p_grad[1]
+            v[top(i,j)] += p_grad[1]
+            # print("Resulting velocities:")
+            # print("u[c] =", u[c], "u[right] =", u[right(i,j)])
 
 def simulate():
     global u, v, prev_U, prev_V, dt, gravity
@@ -627,7 +687,7 @@ def simulate():
     # externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
-    pressureProjectionMC(1)
+    pressureProjectionMC(5)
 
     transferVelocities(False, 0.9)
 
