@@ -722,20 +722,23 @@ def pressureProjectionMC(num_samples : int):
 
                 S = functions.S_2D(cell_pt, in_pt) / P_V
                 grad_G = functions.grad_G_x_2D(cell_pt, bd_pt)
-                # print("S =", S)
-                # print("grad_G =", grad_G)
+                print("S =", S)
+                print("grad_G =", grad_G)
+                print("velocity differences:")
+                print("   u[sample_in] =", u[sample_in])
+                print("           u[c] =", u[c])
+                print("   v[sample_in] =", v[sample_in])
+                print("           v[c] =", v[c])
                 # print("PDFs: P_V =", P_V, "P_A =", P_A)
-                E_V += np.dot(S, np.array([u[sample_in]-u[c], v[sample_in]-v[c]]).transpose())
+                E_V += np.dot(S, np.array([u[sample_in]-u[c], v[sample_in]-v[c]]))
                 E_A += grad_G / P_A * np.dot(n, np.array([u[sample_bd]-u[c], v[sample_bd]-v[c]]))
-                # print("Estimators: E_V =", E_V, "E_A =", E_A)
+                print("Estimators: E_V =", E_V, "E_A =", E_A)
 
             E_V *= 1. / num_samples 
             E_A *= 1. / num_samples
             p_grad = E_V + E_A
             u[c] -= p_grad[0]
-            u[right(i,j)] += p_grad[0]
             v[c] -= p_grad[1]
-            v[top(i,j)] += p_grad[1]
             # print("Resulting velocities:")
             # print("u[c] =", u[c], "u[right] =", u[right(i,j)])
             print("pressure gradient:", p_grad)
@@ -846,7 +849,7 @@ while running and __name__ == "__main__":
         pygame.time.wait(int(dt * 1000))
         continue
     
-    print('### Time step', time_step, '###')
+    print('\n### Time step', time_step, '###')
     screen.fill((255, 255, 255))
 
     if draw_cells:
