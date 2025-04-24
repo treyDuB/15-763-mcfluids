@@ -204,7 +204,7 @@ def pushParticlesApart(num_iterations):
         first_cell_particle[cell] -= 1
 
     # push particles apart
-    min_dist = particle_radius * 2.0
+    min_dist = particle_radius * 1.8
     min_dist2 = min_dist * min_dist
 
     for iter in range(num_iterations):
@@ -250,11 +250,12 @@ def transferVelocities(toGrid, flipRatio):
     n = f_num_Y
     # h = f_spacing
     h_1 = f_inv_spacing
-    h_2 = 0.5 * h
+    h_2 = 0.5 * f_spacing
 
-    if(toGrid):
-        prev_U = u
-        prev_V = v
+    if toGrid:
+        for i in range(f_num_cells):
+            prev_U[i] = u[i]
+            prev_V[i] = v[i]
         du = [0.0] * f_num_cells
         dv = [0.0] * f_num_cells
         u = [0.0] * f_num_cells
@@ -278,15 +279,19 @@ def transferVelocities(toGrid, flipRatio):
             if (cell_type[cell_num] == AIR_CELL):
                 cell_type[cell_num] = FLUID_CELL
                 num_fluid_cells += 1
+                # print('fluid cell', cell_num, num_fluid_cells)
                 # cell_color[cell_num] = 1.0
         for i in range(f_num_cells):
             if cell_type[i] == FLUID_CELL:
                 #check for boundary cells
-                x0 = i - n
-                x1 = i + n
-                y0 = i - 1
-                y1 = i + 1
-                if (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
+                x0 = i - 1
+                x1 = i + 1
+                y0 = i - n
+                y1 = i + n
+                if(x0 < 0 or x1 >= f_num_X or y0 < 0 or y1 >= f_num_Y):
+                    cell_type[i] = FLUID_BOUNDARY_CELL
+                    num_boundary_cells += 1
+                elif (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
                     cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
                     cell_type[i] = FLUID_BOUNDARY_CELL
                     num_boundary_cells += 1
@@ -304,19 +309,25 @@ def transferVelocities(toGrid, flipRatio):
             x = particle_pos[i][0]
             y = particle_pos[i][1]
 
-            x = clamp(int(x * h_1), 0, p_num_X - 1)
-            y = clamp(int(y * h_1), 0, p_num_Y - 1)
+            # print('particle pos', i, x, y, ' dx ', dx, ' dy ', dy)
 
-            x0 = min(int((x-dx) * h_1), p_num_X - 2)
+            # x = clamp(int(x * h_1), 0, f_num_X - 1)
+            # y = clamp(int(y * h_1), 0, f_num_Y - 1)
+
+            x0 = min(int((x-dx) * h_1), f_num_X - 2)
             tx = ((x - dx) - x0 * h) * h_1
-            x1 = min(x0 + 1, p_num_X - 2)
+            x1 = min(x0 + 1, f_num_X - 1)
 
-            y0 = min(int((y-dy) * h_1), p_num_Y - 2)
+            y0 = min(int((y-dy) * h_1), f_num_Y - 2)
             ty = ((y - dy) - y0 * h) * h_1
-            y1 = min(y0 + 1, p_num_Y - 2)
+            y1 = min(y0 + 1, f_num_Y - 1)
 
             sx = 1.0 - tx
             sy = 1.0 - ty
+
+            if(sx < 0.0 or sx > 1.0 or sy < 0.0 or sy > 1.0):
+                print('Out of range sx, sy', sx, sy, x0, x1, y0, y1, x, y)
+                continue
 
             d0 = sx*sy
             d1 = tx*sy
@@ -328,8 +339,10 @@ def transferVelocities(toGrid, flipRatio):
             nr2 = x1*n + y1
             nr3 = x0*n + y1
 
-            if toGrid:
+            if toGrid: #from particles
                 pv = particle_vel[i][component]
+                # print('particle vel', i, component, pv, ' cells ', nr0, nr1, nr2, nr3)
+                # print('positions ', x0, y0, x1, y1, x, y, tx, ty)
                 f[nr0] += d0 * pv
                 f[nr1] += d1 * pv
                 f[nr2] += d2 * pv
@@ -339,7 +352,7 @@ def transferVelocities(toGrid, flipRatio):
                 df[nr2] += d2
                 df[nr3] += d3
 
-            else:
+            else: #to particles
                 offset = n if component == 0 else 1
                 valid0 = 1.0 if cell_type[nr0] != AIR_CELL or cell_type[nr0 - offset] != AIR_CELL else 0.0
                 valid1 = 1.0 if cell_type[nr1] != AIR_CELL or cell_type[nr1 - offset] != AIR_CELL else 0.0
@@ -356,14 +369,18 @@ def transferVelocities(toGrid, flipRatio):
 
                     particle_vel[i][component] = flipRatio * flipV + (1.0 - flipRatio) * picV
 
-        if component == 0:
-            u = f
-            prev_U = f_prev
-            du = df
-        else:
-            v = f    
-            prev_V = f_prev
-            dv = df
+        if component == 0 and toGrid:
+            for i in range(f_num_cells):
+                # if(f[i] != 0.0):
+                #     print('u', i, f[i], prev_U[i], du[i], toGrid)
+                u[i] = f[i]
+                prev_U[i] = f_prev[i]
+                du[i] = df[i]
+        elif component == 1 and toGrid:
+            for i in range(f_num_cells):
+                v[i] = f[i]
+                prev_V[i] = f_prev[i]
+                dv[i] = df[i]
 
     if toGrid:
         # for i in range(len(f)):
@@ -372,11 +389,13 @@ def transferVelocities(toGrid, flipRatio):
         # restore solid cells
         for i in range(f_num_X):
             for j in range(f_num_Y):
-                c = i * n + j
-                if cell_type[c] == SOLID_CELL or (i > 0 and cell_type[c-n] == SOLID_CELL):
-                    u[c] = prev_U[c]
-                if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-1] == SOLID_CELL):
-                    v[c] = prev_V[c]
+                c = j * n + i
+                if cell_type[c] == SOLID_CELL or (i > 0 and cell_type[c-1] == SOLID_CELL):
+                    u[c] = prev_U[c] * 0.0
+                if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-n] == SOLID_CELL):
+                    v[c] = prev_V[c] * 0.0
+                # if cell_type[c] == FLUID_BOUNDARY_CELL or cell_type[c] == FLUID_CELL:
+                    # print("trandfered to fluid cell ", c, u[c], v[c])
 
 
 def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift):
@@ -450,11 +469,11 @@ def updateParticleDensity():
 
         x0 = int((x - h_2) * h_1)
         tx = ((x - h_2) - x0 * h) * h_1
-        x1 = min(x0 + 1, f_num_X - 2)
+        x1 = min(x0 + 1, f_num_X - 1)
 
         y0 = int((y - h_2) * h_1)
         ty = ((y - h_2) - y0 * h) * h_1
-        y1 = min(y0 + 1, f_num_Y - 2)
+        y1 = min(y0 + 1, f_num_Y - 1)
 
         sx = 1.0 - tx
         sy = 1.0 - ty
@@ -510,13 +529,24 @@ def advection(): # Advection step u1 = u0(x - u0(x)*dt)
             x = i * h + 0.5 * h
             y = j * h + 0.5 * h
 
-            x = x - u0[c] * dt
-            y = y - v0[c] * dt
+            # u1[c] = u0[c] - dt * (u0[right] - u0[left])
+            # v1[c] = v0[c] - dt * (v0[top] - v0[bottom])
+
+            
+            # x = x - u0[c] * dt
+            # y = y - v0[c] * dt
+
+            # [prev_u, prev_v] = integrate.evaluateVelocityAtPosition([x, y], h, u0, v0, f_num_Y)
+
+            # x -= prev_u * dt
+            # y -= prev_v * dt
 
             [u1[c], v1[c]] = integrate.evaluateVelocityAtPosition([x, y], h, u0, v0, f_num_Y)
+            
 
-    u = u1
-    v = v1
+    for i in range(f_num_cells):
+        u[i] = u1[i]
+        v[i] = v1[i]
 
 
 def externalForces():
@@ -532,18 +562,15 @@ def externalForces():
 
     for i in range(f_num_cells):
         # if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
-        # u2[i] = u1[i] + gravity[0] * dt
-        # v2[i] = v1[i] + gravity[1] * dt
-        u2[i] = u1[i] + 50.0
-        v2[i] = v1[i] + 50.0
+        u[i] = u1[i] + gravity[0] * dt
+        v[i] = v1[i] + gravity[1] * dt
+        # u2[i] = u1[i] + 50.0
+        # v2[i] = v1[i] + 50.0
 
     # for i in range(len(ground_n)):
     #     if cell_type[i] == FLUID_CELL:
     #         u[i] += ground_n[0] * dt
     #         v[i] += ground_n[1] * dt
-
-    u = u2
-    v = v2
 
 def projection():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -585,6 +612,22 @@ def projection():
     for i in range(f_num_cells):
         u[i] = u4[i]
         v[i] = v4[i]
+        
+
+def testUV():
+    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+
+    total_u = 0.0
+    total_v = 0.0
+    for i in range(f_num_cells):
+        if cell_type[i] == AIR_CELL or cell_type[i] == SOLID_CELL:
+            continue
+        # print("cell: ", i ," u: ", u[i], "v: ", v[i])
+        total_u += u[i]
+        total_v += v[i]
+    
+    print("total_u: ", total_u, "total_v: ", total_v)
+
 
 
 
@@ -604,17 +647,25 @@ def simulate():
     # On grid:
     prev_U = u
     prev_V = v
+    print("before advection")
+    testUV()
     updateParticleDensity()
     advection()
+    print("after advection")
+    testUV()
     externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
     projection()
+    print("after projection")
+    testUV()
+    
 
     transferVelocities(False, 0.9)
 
     # setBoundaryConditions()
     # updateParticles()
+    
 
 
 
