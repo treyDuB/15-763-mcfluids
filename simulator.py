@@ -423,7 +423,7 @@ def transferVelocities(toGrid : bool, flipRatio : float):
                 if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-1] == SOLID_CELL):
                     v[c] = prev_V[c]
 
-# Monte Carlo pressure gradient estimation is in pressureProjectionMC()
+
 def solveIncompressibility(num_iterations : int, dt : float, over_relaxation : float, compensateDrift : bool):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
@@ -738,6 +738,7 @@ def pressureProjectionMC(num_samples : int):
             v[top(i,j)] += p_grad[1]
             # print("Resulting velocities:")
             # print("u[c] =", u[c], "u[right] =", u[right(i,j)])
+            print("pressure gradient:", p_grad)
 
 def simulate():
     global u, v, prev_U, prev_V, dt
