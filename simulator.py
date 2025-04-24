@@ -98,9 +98,9 @@ def left(i, j):
 def right(i, j):
     return clamp((i+1)*f_num_Y+j, 0, f_num_X)
 def bottom(i, j):
-    return clamp(i*f_num_Y+j-1, f_num_Y)
+    return clamp(i*f_num_Y+j-1, 0, f_num_Y)
 def top(i, j):
-    return clamp(i*f_num_Y+j+1, f_num_Y)
+    return clamp(i*f_num_Y+j+1, 0, f_num_Y)
 
 dt = 0.05
 
@@ -556,19 +556,6 @@ def externalForces():
         if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
             u[i] += gravity[0] * dt
             v[i] += gravity[1] * dt
-
-def projection():
-    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
-    global prev_U, prev_V, rho, particle_density, particle_rest_density
-
-    u3 = u
-    v3 = v
-
-    u4 = [0.0] * f_num_cells
-    v4 = [0.0] * f_num_cells
-
-    grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
-    # grad_p = np.array([0.0, 0.0]) * f_num_cells
 
 def pressureProjectionMC(num_samples : int):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
