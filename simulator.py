@@ -82,7 +82,7 @@ def point_to_segment_distance(p, a, b):
     dist_vec = p - closest
     return dist_vec, np.linalg.norm(dist_vec)
 
-f_spacing = 10
+f_spacing = 10.0 # spacing between fluid cells
 f_num_X = int(width / f_spacing) + 1
 f_num_Y = int(height / f_spacing) + 1
 f_num_Z = int(depth / f_spacing) + 1 # not used
@@ -159,8 +159,10 @@ for i in range(num_particles):
 
 particle_vel = particles.perturb(particle_vel, 0.5)
 
-def integrateParticles(dt : float, gravity : list[float]):
+
+def integrateParticles(dt : float):
     global particle_pos, particle_vel, num_particles, width, height, ground_o, ground_n
+    global gravity
 
     for i in range(0, num_particles):
         particle_vel[i][0] += gravity[0] * dt
@@ -248,7 +250,8 @@ def pushParticlesApart(num_iterations : int):
         cell_particle[index] = i
         first_cell_particle[cell] -= 1
 
-    min_dist = 2.0 * particle_radius
+    # push particles apart
+    min_dist = particle_radius * 2.0
     min_dist2 = min_dist * min_dist
 
     for iter in range(num_iterations):
@@ -408,9 +411,10 @@ def transferVelocities(toGrid : bool, flipRatio : float):
             dv = df
 
     if toGrid:
-        for i in range(len(f)):
-            if df[i] > 0.0:
-                f[i] /= df[i]
+        # for i in range(len(f)):
+        #     if df[i] > 0.0:
+        #         f[i] /= df[i]
+        # restore solid cells
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * n + j
@@ -521,7 +525,14 @@ def updateParticleDensity():
 
     particle_density = d
 
-def advection():
+    # get pressure
+    for i in range(f_num_cells):
+        if particle_density[i] > 0.0:
+            p[i] = (particle_density[i] - particle_rest_density) / particle_rest_density
+        else:
+            p[i] = 0.0
+
+def advection(): # Advection step u1 = u0(x - u0(x)*dt)
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
     
@@ -551,11 +562,61 @@ def advection():
 def externalForces():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
+    global gravity
+
+    u1 = u
+    v1 = v
+
+    u2 = [0.0] * f_num_cells
+    v2 = [0.0] * f_num_cells
 
     for i in range(f_num_cells):
-        if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
-            u[i] += gravity[0] * dt
-            v[i] += gravity[1] * dt
+        # if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
+        # u2[i] = u1[i] + gravity[0] * dt
+        # v2[i] = v1[i] + gravity[1] * dt
+        u2[i] = u1[i] + 50.0
+        v2[i] = v1[i] + 50.0
+
+def pressureProjectionDiscrete():
+    global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
+    global prev_U, prev_V, rho, particle_density, particle_rest_density
+
+    u3 = u
+    v3 = v
+
+    u4 = [0.0] * f_num_cells
+    v4 = [0.0] * f_num_cells
+
+    #Want u4 and v4 to be the divergence of u3 and v3
+    # grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
+    grad_p = np.array([0.0, 0.0]) * f_num_cells
+
+    inv_rho = 1.0 / rho
+    inv_h = 1.0 / h
+
+    coef = dt * inv_rho * inv_h * 1000.0
+
+    for i in range(f_num_X):
+        for j in range(f_num_Y):
+            c = i * f_num_Y + j
+            if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
+                continue
+
+            # left = (i - 1) * f_num_Y + j
+            right = (i + 1) * f_num_Y + j
+            # bottom = i * f_num_Y + j - 1
+            top = i * f_num_Y + j + 1
+
+            u4[c] = u3[c] - coef * (p[right] - p[c])
+            v4[c] = v3[c] - coef * (p[top] - p[c])
+
+    # u = u4
+    # v = v4
+    # u = [0.0] * f_num_cells
+    # v = [0.0] * f_num_cells
+    for i in range(f_num_cells):
+        u[i] = u4[i]
+        v[i] = v4[i]
 
 def pressureProjectionMC(num_samples : int):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -679,15 +740,23 @@ def pressureProjectionMC(num_samples : int):
             # print("u[c] =", u[c], "u[right] =", u[right(i,j)])
 
 def simulate():
-    global u, v, prev_U, prev_V, dt, gravity
-    integrateParticles(dt, gravity)
-    pushParticlesApart(10)
-    transferVelocities(True, 0.95)
+    global u, v, prev_U, prev_V, dt
+    integrateParticles(dt) # step forward in time
+    pushParticlesApart(20)
+
+    transferVelocities(True, 0.9)
+
+    # print cell types
+    # print("Number of fluid cells:", num_fluid_cells)
+    # print("Number of boundary cells:", num_boundary_cells)
+
+
+    # On grid:
     prev_U = u
     prev_V = v
     updateParticleDensity()
     advection()
-    # externalForces()
+    externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
     pressureProjectionMC(5)
