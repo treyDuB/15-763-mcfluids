@@ -55,7 +55,7 @@ print("ground_o: ", ground_o)
 
 # fluid setup
 rho = 1000 # density
-gravity = [0.0, -500]
+gravity = [0.0, -9.8]
 
 width = 200
 height = 200
@@ -92,7 +92,7 @@ f_num_cells = f_num_X * f_num_Y
 
 print(f_num_X, f_num_Y, h, f_num_cells)
 
-dt = 0.005
+dt = 0.05
 
 # grid setup
 u = [0.0] * f_num_cells
@@ -139,7 +139,7 @@ max_particles_per_cell = 100
 num_particles = len(xtmp)
 for i in range(num_particles):
     if i < max_particles:
-        particle_pos[i] = (xtmp[i]) + [width / 2, height - 25]
+        particle_pos[i] = (xtmp[i]) + [width / 2, height - 75]
     else:
         break
 
@@ -314,8 +314,7 @@ def transferVelocities(toGrid, flipRatio):
                 if(x0 < 0 or x1 >= f_num_X or y0 < 0 or y1 >= f_num_Y):
                     cell_type[i] = FLUID_BOUNDARY_CELL
                     num_boundary_cells += 1
-                if x0 >= 0 and x1 < f_num_cells and y0 >= 0 and y1 < f_num_cells:
-                    elif (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or
+                elif (cell_type[x0] == AIR_CELL or cell_type[x1] == AIR_CELL or
                         cell_type[y0] == AIR_CELL or cell_type[y1] == AIR_CELL or
                         cell_type[x0] == SOLID_CELL or cell_type[x1] == SOLID_CELL or
                         cell_type[y0] == SOLID_CELL or cell_type[y1] == SOLID_CELL):
@@ -396,31 +395,33 @@ def transferVelocities(toGrid, flipRatio):
 
                     particle_vel[i][component] = flipRatio * flipV + (1.0 - flipRatio) * picV
 
+        for i in range(len(f)):
+            if df[i] > 0.0:
+                f[i] /= df[i]
+
         if component == 0 and toGrid:
             for i in range(f_num_cells):
                 # if(f[i] != 0.0):
                 #     print('u', i, f[i], prev_U[i], du[i], toGrid)
                 u[i] = f[i]
-                prev_U[i] = f_prev[i]
+                # prev_U[i] = f_prev[i]
                 du[i] = df[i]
         elif component == 1 and toGrid:
             for i in range(f_num_cells):
                 v[i] = f[i]
-                prev_V[i] = f_prev[i]
+                # prev_V[i] = f_prev[i]
                 dv[i] = df[i]
 
     if toGrid:
-        # for i in range(len(f)):
-        #     if df[i] > 0.0:
-        #         f[i] /= df[i]
+        
         # restore solid cells
         for i in range(f_num_X):
             for j in range(f_num_Y):
                 c = i * n + j
                 if cell_type[c] == SOLID_CELL or (i > 0 and cell_type[c-n] == SOLID_CELL):
-                    u[c] = prev_U[c] * 0.0
+                    u[c] = prev_U[c]
                 if cell_type[c] == SOLID_CELL or (j > 0 and cell_type[c-1] == SOLID_CELL):
-                    v[c] = prev_V[c] * 0.0
+                    v[c] = prev_V[c]
 
 def solveIncompressibility(num_iterations, dt, over_relaxation, compensateDrift):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -582,6 +583,10 @@ def externalForces():
         if cell_type[i] == FLUID_CELL or cell_type[i] == FLUID_BOUNDARY_CELL:
             u[i] += gravity[0] * dt
             v[i] += gravity[1] * dt
+        if(cell_type[i] == SOLID_CELL):
+            u[i] = prev_U[i]
+            v[i] = prev_V[i]
+
 
 def projection():
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
@@ -600,7 +605,7 @@ def projection():
     inv_rho = 1.0 / rho
     inv_h = 1.0 / h
 
-    coef = dt * inv_rho * inv_h * 1000.0
+    coef = dt * inv_rho * 1000.0
 
     for i in range(f_num_X):
         for j in range(f_num_Y):
@@ -613,16 +618,16 @@ def projection():
             # bottom = i * f_num_Y + j - 1
             top = i * f_num_Y + j + 1
 
-            u4[c] = u3[c] - coef * (p[right] - p[c])
-            v4[c] = v3[c] - coef * (p[top] - p[c])
+            u[c] = u3[c] - coef * (p[right] - p[c])
+            v[c] = v3[c] - coef * (p[top] - p[c])
 
     # u = u4
     # v = v4
     # u = [0.0] * f_num_cells
     # v = [0.0] * f_num_cells
-    for i in range(f_num_cells):
-        u[i] = u4[i]
-        v[i] = v4[i]
+    # for i in range(f_num_cells):
+    #     u[i] = u4[i]
+    #     v[i] = v4[i]
         
 
 def testUV():
@@ -664,7 +669,7 @@ def simulate():
     advection()
     print("after advection")
     testUV()
-    externalForces()
+    # externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
     projection()
