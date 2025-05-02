@@ -616,12 +616,12 @@ def pressureProjectionDiscrete():
     u3 = u
     v3 = v
 
-    u4 = [0.0] * f_num_cells
-    v4 = [0.0] * f_num_cells
+    # u4 = [0.0] * f_num_cells
+    # v4 = [0.0] * f_num_cells
 
     #Want u4 and v4 to be the divergence of u3 and v3
     # grad_p_hat = np.array([0.0, 0.0]) * f_num_cells
-    grad_p = np.array([0.0, 0.0]) * f_num_cells
+    # grad_p = np.array([0.0, 0.0]) * f_num_cells
 
     inv_rho = 1.0 / rho
     inv_h = 1.0 / h
@@ -634,13 +634,17 @@ def pressureProjectionDiscrete():
             if cell_type[c] == AIR_CELL or cell_type[c] == SOLID_CELL:
                 continue
 
-            # left = (i - 1) * f_num_Y + j
-            right = (i + 1) * f_num_Y + j
-            # bottom = i * f_num_Y + j - 1
-            top = i * f_num_Y + j + 1
+            # # left = (i - 1) * f_num_Y + j
+            # right = (i + 1) * f_num_Y + j
+            # # bottom = i * f_num_Y + j - 1
+            # top = i * f_num_Y + j + 1
 
-            u[c] = u3[c] - coef * (p[right] - p[c])
-            v[c] = v3[c] - coef * (p[top] - p[c])
+            p_grad_u = coef * (p[right(i, j)] - p[c])
+            p_grad_v = coef * (p[top(i, j)] - p[c])
+            print("p_grad (discrete): (", p_grad_u, p_grad_v, ")")
+
+            u[c] = u3[c] - coef * (p[right(i, j)] - p[c])
+            v[c] = v3[c] - coef * (p[top(i, j)] - p[c])
 
     # u = u4
     # v = v4
@@ -680,16 +684,11 @@ def pressureProjectionMC(num_samples : int):
 
     coef = dt / particle_rest_density
 
-    ADJ_LEFT   = False
-    ADJ_RIGHT  = False
-    ADJ_TOP    = False
-    ADJ_BOTTOM = False
-    num_adj_walls = 0
-
     for i in range(f_num_X):
         for j in range(f_num_Y):
             c = i * f_num_Y + j
             # print("cell type of", c, ":", cell_type[c])
+
             if (cell_type[c] != FLUID_CELL and cell_type[c] != FLUID_BOUNDARY_CELL):
                 continue
             
@@ -702,8 +701,16 @@ def pressureProjectionMC(num_samples : int):
                 # print("## Sample", sample, "##")
                 P_A = 1. / num_boundary_cells / f_spacing
 
+                ADJ_LEFT   = False
+                ADJ_RIGHT  = False
+                ADJ_TOP    = False
+                ADJ_BOTTOM = False
+                num_adj_walls = 0
+
                 sample_in : int = fluid_cells[np.random.randint(0, num_fluid_cells)] # in for interior
                 sample_bd : int = boundary_cells[np.random.randint(0, num_boundary_cells)] # bd for boundary
+                print("Boundary sample:", sample_bd)
+                print("Cell type of bd sample:", cell_type[sample_bd])
                 [sbd_x, sbd_y] = [int(np.floor(sample_bd / f_num_Y)), sample_bd % f_num_Y]
                 # # rejection sampling I Guess
                 # while cell_type[sample_in] != FLUID_CELL:
@@ -727,18 +734,23 @@ def pressureProjectionMC(num_samples : int):
                 # of the fluid domain
                 bd_pt = np.array([sbd_x * f_spacing, sbd_y * f_spacing]).astype(np.float64)
 
-                if (left(sbd_x, sbd_y) != FLUID_CELL):
+                if (cell_type[left(sbd_x, sbd_y)] != FLUID_CELL and cell_type[left(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_LEFT = True
                     num_adj_walls += 1
-                if (right(sbd_x, sbd_y) != FLUID_CELL):
+                    print("Left cell type:", cell_type[left(sbd_x, sbd_y)])
+                if (cell_type[right(sbd_x, sbd_y)] != FLUID_CELL and cell_type[right(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_RIGHT = True
                     num_adj_walls += 1
-                if (top(sbd_x, sbd_y) != FLUID_CELL):
+                if (cell_type[top(sbd_x, sbd_y)] != FLUID_CELL and cell_type[top(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_TOP = True
                     num_adj_walls += 1
-                if (bottom(sbd_x, sbd_y) != FLUID_CELL):
+                if (cell_type[bottom(sbd_x, sbd_y)] != FLUID_CELL and cell_type[bottom(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_BOTTOM = True
                     num_adj_walls += 1
+
+                print("boundaries:", "Left" if ADJ_LEFT else "", "Right" if ADJ_RIGHT else "",
+                      "Top" if ADJ_TOP else "", "Bottom" if ADJ_BOTTOM else "")
+                print("num adj walls:", num_adj_walls)
                 
                 bd_offset = np.random.uniform(0, f_spacing)
                 if (num_adj_walls == 0):
@@ -791,7 +803,7 @@ def pressureProjectionMC(num_samples : int):
             v[c] -= p_grad[1] * coef
             # print("Resulting velocities:")
             # print("u[c] =", u[c], "u[right] =", u[right(i,j)])
-            print("pressure gradient:", p_grad)
+            print("p_grad (MC):", p_grad)
 
 def simulate():
     global u, v, prev_U, prev_V, dt
@@ -808,18 +820,18 @@ def simulate():
     # On grid:
     prev_U = u
     prev_V = v
-    print("before advection")
+    # print("before advection")
     testUV()
     updateParticleDensity()
     advection()
-    print("after advection")
+    # print("after advection")
     testUV()
     # externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
-    pressureProjectionDiscrete()
+    pressureProjectionMC(5)
     # pressureProjectionMC(10)
-    print("after projection")
+    # print("after projection")
     testUV()
     
 
@@ -866,8 +878,8 @@ def screen_projection(x):
 
 time_step = 0
 max_time_step = 200
-draw_grid = False
-draw_cells = False
+draw_grid = True
+draw_cells = True
 show_numbers = False
 calc_KE = False
 particles.write_to_file(time_step, particle_pos, num_particles)
