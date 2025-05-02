@@ -11,10 +11,16 @@ def G_3D(x, y, z):
     r = np.sqrt(x*x + y*y + z*z)
     return (1.0 / (4.0 * np.pi)) * (1.0 / r)
 
+# returns 2x? vector??
 def grad_G_2D(x, y):
     # Gradient of 2D Green's function
     r = np.sqrt(x*x + y*y)
     return np.array([-y / (np.pi * r**2), x / (np.pi * r**2)])
+
+def grad_G_x_2D(x,y):
+    # Gradient of 2D Green's function w.r.t. x
+    r = np.linalg.norm(y-x)
+    return (x-y)/(r**3)/4./np.pi
 
 def grad_G_3D(x, y, z):
     # Gradient of 3D Green's function
@@ -29,6 +35,7 @@ def Hessian_G_2D(x, y):
            np.array([[1 / (np.pi * r**2), 0],
                      [0, 1 / (np.pi * r**2)]])
 
+# returns 2x2 matrix
 def S_2D(x, y):
     # 2D S function
     r = y - x
