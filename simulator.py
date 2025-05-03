@@ -94,13 +94,13 @@ print(f_num_X, f_num_Y, h, f_num_cells)
 
 # grid navigation helpers
 def left(i, j):
-    return clamp((i-1)*f_num_Y+j, 0, f_num_X)
+    return clamp((i-1)*f_num_Y+j, 0, f_num_cells)
 def right(i, j):
-    return clamp((i+1)*f_num_Y+j, 0, f_num_X)
+    return clamp((i+1)*f_num_Y+j, 0, f_num_cells)
 def bottom(i, j):
-    return clamp(i*f_num_Y+j-1, 0, f_num_Y)
+    return clamp(i*f_num_Y+j-1, 0, f_num_cells)
 def top(i, j):
-    return clamp(i*f_num_Y+j+1, 0, f_num_Y)
+    return clamp(i*f_num_Y+j+1, 0, f_num_cells)
 
 dt = 0.05
 
@@ -672,7 +672,7 @@ def testUV():
 def pressureProjectionMC(num_samples : int):
     global u, v, p, s, f_num_X, f_num_Y, f_inv_spacing, h, f_num_cells
     global prev_U, prev_V, rho, particle_density, particle_rest_density
-    global dt
+    global dt, left
 
     n = [0., 0.] # unit normal facing out of the boundary
 
@@ -697,7 +697,7 @@ def pressureProjectionMC(num_samples : int):
 
             cell_pt = np.array([i * f_spacing, j * f_spacing])
 
-            for sample in range(num_samples):
+            for _ in range(num_samples):
                 # print("## Sample", sample, "##")
                 P_A = 1. / num_boundary_cells / f_spacing
 
@@ -710,8 +710,9 @@ def pressureProjectionMC(num_samples : int):
                 sample_in : int = fluid_cells[np.random.randint(0, num_fluid_cells)] # in for interior
                 sample_bd : int = boundary_cells[np.random.randint(0, num_boundary_cells)] # bd for boundary
                 print("Boundary sample:", sample_bd)
-                print("Cell type of bd sample:", cell_type[sample_bd])
+                print("Cell type of bd sample:", cell_type[sample_bd]) # <- good sign
                 [sbd_x, sbd_y] = [int(np.floor(sample_bd / f_num_Y)), sample_bd % f_num_Y]
+                print("sbd:", [sbd_x, sbd_y])
                 # # rejection sampling I Guess
                 # while cell_type[sample_in] != FLUID_CELL:
                 #     sample_in = np.random.randint(0, f_num_cells)
@@ -726,18 +727,20 @@ def pressureProjectionMC(num_samples : int):
                 
                 # (float) sample a location within the cell
                 in_pt = ( np.array([sin_x * f_spacing, sin_y * f_spacing])
-                        + np.array([np.random.uniform(0, f_spacing), np.random.uniform(0, f_spacing)]) )
+                        + np.array([np.random.uniform(0., f_spacing), np.random.uniform(0., f_spacing)]) )
 
                 # not to be confused with bidirectional path tracing
                 # we will sample a location on the edge of a grid cell,
                 # but first need to determine which edges are boundaries
                 # of the fluid domain
+                # bd_pt is like a lower left corner type thing
                 bd_pt = np.array([sbd_x * f_spacing, sbd_y * f_spacing]).astype(np.float64)
+                print("bd_pt:", bd_pt)
 
                 if (cell_type[left(sbd_x, sbd_y)] != FLUID_CELL and cell_type[left(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_LEFT = True
                     num_adj_walls += 1
-                    print("Left cell type:", cell_type[left(sbd_x, sbd_y)])
+                    l = left(sbd_x, sbd_y)
                 if (cell_type[right(sbd_x, sbd_y)] != FLUID_CELL and cell_type[right(sbd_x, sbd_y)] != FLUID_BOUNDARY_CELL):
                     ADJ_RIGHT = True
                     num_adj_walls += 1
@@ -772,17 +775,25 @@ def pressureProjectionMC(num_samples : int):
                     # (we can still use num_adj_walls because it was not updated)
                     # (after "turning off") all the other walls
                     P_A /= num_adj_walls
+                    ADJ_LEFT = adj_walls[0]
+                    ADJ_RIGHT = adj_walls[1]
+                    ADJ_TOP = adj_walls[2]
+                    ADJ_BOTTOM = adj_walls[3]
+                print("boundaries (after):", "Left" if ADJ_LEFT else "", "Right" if ADJ_RIGHT else "",
+                      "Top" if ADJ_TOP else "", "Bottom" if ADJ_BOTTOM else "")
+                print("num adj walls:", num_adj_walls)
                 
                 # then proceed as though we just have one adjacent wall
                 bd_pt += np.array([float(ADJ_RIGHT), float(ADJ_TOP)]) * f_spacing
                 bd_pt += np.array([float(ADJ_BOTTOM or ADJ_TOP), float(ADJ_LEFT or ADJ_RIGHT)]) * bd_offset
-
+                # print("bd_pt (new):", bd_pt)
                 # define normal
                 # i'm so silly with booleans
                 n[int(ADJ_TOP or ADJ_BOTTOM)] = (-1)**int(ADJ_LEFT or ADJ_BOTTOM)
-                # print("n =",n)
+                n[int(ADJ_LEFT or ADJ_RIGHT)] = 0
+                print("n =",n)
 
-                S = functions.S_2D(cell_pt, in_pt) / P_V
+                S = functions.S_2D(cell_pt, in_pt)
                 grad_G = functions.grad_G_x_2D(cell_pt, bd_pt)
                 # print("S =", S)
                 # print("grad_G =", grad_G)
@@ -792,7 +803,7 @@ def pressureProjectionMC(num_samples : int):
                 # print("   v[sample_in] =", v[sample_in])
                 # print("           v[c] =", v[c])
                 # print("PDFs: P_V =", P_V, "P_A =", P_A)
-                E_V += np.dot(S, np.array([u[sample_in]-u[c], v[sample_in]-v[c]]))
+                E_V += np.dot(S / P_V, np.array([u[sample_in]-u[c], v[sample_in]-v[c]]))
                 E_A += grad_G / P_A * np.dot(n, np.array([u[sample_bd]-u[c], v[sample_bd]-v[c]]))
                 # print("Estimators: E_V =", E_V, "E_A =", E_A)
 
@@ -829,7 +840,7 @@ def simulate():
     # externalForces()
     # diffusion() # solving for viscosity
     # solveIncompressibility(100, dt, 1.9, False) # TODO: solve for projection instead
-    pressureProjectionMC(5)
+    pressureProjectionMC(25)
     # pressureProjectionMC(10)
     # print("after projection")
     testUV()
